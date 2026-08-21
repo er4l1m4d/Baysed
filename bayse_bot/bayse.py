@@ -1,0 +1,95 @@
+"""Documented Bayse HTTP adapter; unknown fields remain in `raw` for traceability."""
+from __future__ import annotations
+import asyncio, base64, hashlib, hmac, json, time
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+import aiohttp
+from .models import BookLevel, OrderBook, Outcome, Quote
+
+DOCS = "https://docs.bayse.markets/"
+
+class BayseHTTPError(RuntimeError):
+    def __init__(self, status: int, message: str, request_id: str | None = None):
+        super().__init__(f"Bayse HTTP {status}: {message}")
+        self.status, self.request_id = status, request_id
+
+def canonical_json_bytes(body: dict[str, Any]) -> bytes:
+    """The exact UTF-8 bytes used for both hash/signature and HTTP body."""
+    return json.dumps(body, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
+
+def sign_request(secret: str, timestamp: int, method: str, path: str, body: bytes | None = None) -> str:
+    body_hash = hashlib.sha256(body).hexdigest() if body else ""
+    payload = f"{timestamp}.{method.upper()}.{path}.{body_hash}".encode()
+    return base64.b64encode(hmac.new(secret.encode(), payload, hashlib.sha256).digest()).decode()
+
+def _d(v: Any, default: str = "0") -> Decimal: return Decimal(str(v if v is not None else default))
+
+class BayseClient:
+    def __init__(self, base_url: str, public_key: str = "", secret_key: str = "", session: aiohttp.ClientSession | None = None):
+        self.base_url, self.public_key, self.secret_key, self.session = base_url.rstrip("/"), public_key, secret_key, session
+        self._owned_session = session is None
+
+    async def __aenter__(self):
+        if self.session is None: self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+        return self
+    async def __aexit__(self, *_):
+        if self._owned_session and self.session: await self.session.close()
+
+    async def request(self, method: str, path: str, body: dict[str, Any] | None = None, *, authenticated: bool = False, signed: bool = False, retries: int = 2) -> dict[str, Any]:
+        if self.session is None: raise RuntimeError("BayseClient must be used as an async context manager")
+        raw = canonical_json_bytes(body) if body is not None else None
+        headers: dict[str, str] = {"Accept": "application/json"}
+        if authenticated:
+            if not self.public_key: raise RuntimeError("authenticated Bayse request requires BAYSE_PUBLIC_KEY")
+            headers["X-Public-Key"] = self.public_key
+        if signed:
+            if not self.secret_key: raise RuntimeError("signed Bayse request requires BAYSE_SECRET_KEY")
+            timestamp = int(time.time()); headers.update({"X-Timestamp": str(timestamp), "X-Signature": sign_request(self.secret_key, timestamp, method, path, raw), "Content-Type": "application/json"})
+        for attempt in range(retries + 1):
+            try:
+                async with self.session.request(method, self.base_url + path, headers=headers, data=raw) as response:
+                    request_id = response.headers.get("X-Request-Id") or response.headers.get("x-request-id")
+                    payload = await response.json(content_type=None)
+                    if response.status < 300: return payload if isinstance(payload, dict) else {"data": payload}
+                    retryable = method.upper() in {"GET", "HEAD"} and response.status in {429, 500, 502, 503, 504}
+                    if retryable and attempt < retries:
+                        await asyncio.sleep(min(2 ** attempt, 4)); continue
+                    raise BayseHTTPError(response.status, str(payload), request_id)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                if method.upper() in {"GET", "HEAD"} and attempt < retries:
+                    await asyncio.sleep(min(2 ** attempt, 4)); continue
+                raise BayseHTTPError(0, str(exc)) from exc
+        raise AssertionError("unreachable")
+
+    async def events(self) -> list[dict[str, Any]]:
+        return self._event_list(await self.request("GET", "/v1/pm/events?status=open", authenticated=bool(self.public_key)))
+    @staticmethod
+    def _event_list(payload: dict[str, Any]) -> list[dict[str, Any]]: return payload.get("events", payload.get("data", []))
+    async def book(self, market_id: str) -> dict[str, Any]: return await self.request("GET", f"/v1/pm/books?marketId={market_id}")
+    async def quote(self, event_id: str, market_id: str, body: dict[str, Any]) -> dict[str, Any]: return await self.request("POST", f"/v1/pm/events/{event_id}/markets/{market_id}/quote", body, authenticated=bool(self.public_key), signed=bool(self.secret_key), retries=0)
+    async def place_order(self, event_id: str, market_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        # Never retried: caller must poll/reconcile after an ambiguous outcome.
+        return await self.request("POST", f"/v1/pm/events/{event_id}/markets/{market_id}/orders", body, authenticated=True, signed=True, retries=0)
+    async def orders(self) -> dict[str, Any]: return await self.request("GET", "/v1/pm/orders", authenticated=True)
+    async def portfolio(self) -> dict[str, Any]: return await self.request("GET", "/v1/pm/portfolio", authenticated=True)
+    async def activities(self) -> dict[str, Any]: return await self.request("GET", "/v1/pm/activities", authenticated=True)
+    async def cancel(self, order_id: str) -> dict[str, Any]: return await self.request("DELETE", f"/v1/pm/orders/{order_id}", authenticated=True, signed=True, retries=0)
+
+def parse_book(payload: dict[str, Any], market_id: str, outcome: Outcome) -> OrderBook:
+    """Adapter supports documented endpoint but rejects absent/ambiguous book shapes. TODO: verify live response nesting from Bayse docs/account."""
+    source = payload.get("book", payload)
+    def levels(name: str, reverse: bool) -> tuple[BookLevel, ...]:
+        raw = source.get(name, [])
+        parsed = [BookLevel(_d(x.get("price") if isinstance(x, dict) else x[0]), _d(x.get("quantity", x.get("size")) if isinstance(x, dict) else x[1])) for x in raw]
+        return tuple(sorted(parsed, key=lambda x: x.price, reverse=reverse))
+    captured = datetime.now(timezone.utc)
+    return OrderBook(market_id, outcome, levels("bids", True), levels("asks", False), captured)
+
+def parse_quote(payload: dict[str, Any], side: str, outcome: Outcome) -> Quote:
+    q = payload.get("quote", payload)
+    # CLOB fields are documented in Fees. Missing fields remain a hard failure.
+    required = ("price", "quantity", "fee", "amount", "completeFill")
+    aliases = {"price": "expectedPrice", "quantity": "expectedShares"}
+    if any(k not in q and aliases.get(k) not in q for k in required): raise ValueError("incomplete Bayse quote; refusing execution")
+    return Quote(side.upper(), outcome, _d(q.get("price", q.get("expectedPrice"))), _d(q.get("quantity", q.get("expectedShares"))), _d(q["fee"]), _d(q["amount"]), bool(q["completeFill"]), datetime.now(timezone.utc), q)
