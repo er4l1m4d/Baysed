@@ -61,10 +61,15 @@ class BayseFeed:
         self.candle_window_seconds = candle_window_seconds
 
         # Local candle history: (timestamp, close_price, tick_volume)
-        # tick_volume is incremented per price tick within each candle window.
         self.candles: deque[tuple[datetime, Decimal, Decimal]] = deque(maxlen=240)
         self.last_tick_at: datetime | None = None
         self.last_price: Decimal | None = None
+
+        # Grace period: don't check staleness until we've received at least
+        # one price tick after WS connection. Prevents immediate stale death
+        # when reseed fails but WS is working.
+        self._connected_at: datetime | None = None
+        self._received_first_tick: bool = False
 
         # Current candle accumulator
         self._candle_start: datetime | None = None
@@ -91,12 +96,16 @@ class BayseFeed:
                 self.last_tick_at = datetime.now(timezone.utc)
                 log.info("BayseFeed reseeded: %d candles, last price=%s", len(self.candles), self.last_price)
         except Exception as exc:
-            log.warning("BayseFeed reseed error: %s", exc)
+            log.warning("BayseFeed reseed error: %s: %s", type(exc).__name__, exc)
 
-    def ingest_tick(self, price: str | float, at: datetime | None = None) -> None:
+    def ingest_tick(self, price: str | float | int, at: datetime | None = None) -> None:
         """Process a single BTC price tick from the WebSocket."""
         now = at or datetime.now(timezone.utc)
-        p = Decimal(str(price))
+        try:
+            p = Decimal(str(price))
+        except Exception:
+            log.debug("BayseFeed ignoring invalid price: %r", price)
+            return
         self.last_price = p
         self.last_tick_at = now
 
@@ -181,6 +190,8 @@ class BayseFeed:
                         "symbols": ["BTCUSDT"],
                     }))
                     backoff = 1
+                    self._connected_at = datetime.now(timezone.utc)
+                    self._received_first_tick = False
                     log.info("BayseFeed connected, subscribed to BTCUSDT")
 
                     while not stop.is_set():
@@ -195,11 +206,20 @@ class BayseFeed:
                                 price = data.get("price")
                                 if price is not None:
                                     self.ingest_tick(price)
+                                    self._received_first_tick = True
                                     if on_features:
                                         await on_features(self.state.btc_features)
+                            else:
+                                log.debug("BayseFeed ignoring message type=%s", msg.get("type"))
 
-                        if self.stale():
-                            raise RuntimeError("Bayse websocket data stale")
+                        # Only check staleness after we've received at least
+                        # one tick, or after a 10s grace period from connection.
+                        if self._received_first_tick or (
+                            self._connected_at
+                            and (datetime.now(timezone.utc) - self._connected_at).total_seconds() > 10
+                        ):
+                            if self.stale():
+                                raise RuntimeError("Bayse websocket data stale")
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException, RuntimeError) as exc:
                 log.warning("BayseFeed connection issue: %s (retrying in %ds)", exc, min(backoff, 30))
