@@ -2,8 +2,8 @@
 
 BayseFeed replaces BybitFeed as the primary BTC data source.
 It connects to wss://socket.bayse.markets/ws/v1/realtime for live
-BTC price ticks and maintains a local candle history for feature
-computation.
+BTC price ticks (sourced from Binance) and maintains a local candle
+history for feature computation.
 
 MarketState is the single shared object that all components read from.
 """
@@ -13,13 +13,12 @@ from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Awaitable, Callable
-import aiohttp, websockets
+import websockets
 from .models import BTCFeatures
 
 log = logging.getLogger(__name__)
 
 BAYSE_WS = "wss://socket.bayse.markets/ws/v1/realtime"
-BYBIT_REST_CANDLES = "https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=1&limit=200"
 
 
 class MarketState:
@@ -43,11 +42,16 @@ class BayseFeed:
     """BTC price feed via Bayse WebSocket.
 
     Connects to the Bayse realtime asset price stream for BTCUSDT.
-    Maintains a local candle deque for feature computation (momentum,
-    volume ratio, ATR).
+    The price data originates from Binance — the same source Bayse
+    uses for contract resolution.
 
-    Features are recomputed on every price tick and stored in the
-    shared MarketState.
+    Maintains a local candle deque for feature computation (momentum,
+    volume ratio, ATR). Features are recomputed on every price tick
+    and stored in the shared MarketState.
+
+    Startup warm-up: features remain incomplete until enough candle
+    history is accumulated (~22 minutes with 60s candles). The bot
+    safely rejects incomplete data during this period.
     """
 
     def __init__(
@@ -55,19 +59,19 @@ class BayseFeed:
         state: MarketState,
         stale_after_seconds: int = 30,
         candle_window_seconds: int = 60,
+        momentum_window_seconds: int = 120,
     ) -> None:
         self.state = state
         self.stale_after_seconds = stale_after_seconds
         self.candle_window_seconds = candle_window_seconds
+        self.momentum_window_seconds = momentum_window_seconds
 
         # Local candle history: (timestamp, close_price, tick_volume)
         self.candles: deque[tuple[datetime, Decimal, Decimal]] = deque(maxlen=240)
         self.last_tick_at: datetime | None = None
         self.last_price: Decimal | None = None
 
-        # Grace period: don't check staleness until we've received at least
-        # one price tick after WS connection. Prevents immediate stale death
-        # when reseed fails but WS is working.
+        # Grace period tracking
         self._connected_at: datetime | None = None
         self._received_first_tick: bool = False
 
@@ -75,28 +79,6 @@ class BayseFeed:
         self._candle_start: datetime | None = None
         self._candle_close: Decimal = Decimal("0")
         self._candle_volume: Decimal = Decimal("0")
-
-    async def reseed(self, session: aiohttp.ClientSession) -> None:
-        """Fetch historical 1-minute candles from Bybit REST to seed the deque."""
-        try:
-            async with session.get(BYBIT_REST_CANDLES, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                if r.status >= 300:
-                    log.warning("Bybit REST reseed failed: %d", r.status)
-                    return
-                rows = (await r.json())["result"]["list"]
-            self.candles.clear()
-            for row in reversed(rows):
-                self.candles.append((
-                    datetime.fromtimestamp(int(row[0]) / 1000, timezone.utc),
-                    Decimal(str(row[4])),
-                    Decimal(str(row[5])),
-                ))
-            if self.candles:
-                self.last_price = self.candles[-1][1]
-                self.last_tick_at = datetime.now(timezone.utc)
-                log.info("BayseFeed reseeded: %d candles, last price=%s", len(self.candles), self.last_price)
-        except Exception as exc:
-            log.warning("BayseFeed reseed error: %s: %s", type(exc).__name__, exc)
 
     def ingest_tick(self, price: str | float | int, at: datetime | None = None) -> None:
         """Process a single BTC price tick from the WebSocket."""
@@ -144,11 +126,10 @@ class BayseFeed:
                 Decimal("0"), Decimal("0"), Decimal("0"), now, False,
             )
 
-        # Momentum: compare last price to price at least `window_seconds` back
-        window = self.candle_window_seconds * 60  # approximate from candle count
+        # Momentum: compare last price to price at least `momentum_window_seconds` ago
         base = self.candles[0][1]
         for t, p, _ in reversed(self.candles):
-            if (now - t).total_seconds() >= window:
+            if (now - t).total_seconds() >= self.momentum_window_seconds:
                 base = p
                 break
         momentum = (self.last_price - base) / base * 100 if base else Decimal("0")
@@ -172,18 +153,17 @@ class BayseFeed:
         stop: asyncio.Event,
         on_features: Callable[[BTCFeatures], Awaitable[None]] | None = None,
     ) -> None:
-        """Main WebSocket loop with bounded reconnect and exponential backoff."""
+        """Main WebSocket loop with bounded reconnect and exponential backoff.
+
+        No REST reseed — builds candle history purely from WS ticks.
+        Features remain incomplete during the initial warm-up period.
+        """
         backoff = 1
         while not stop.is_set():
             try:
-                # Seed from REST before connecting WS
-                async with aiohttp.ClientSession() as session:
-                    await self.reseed(session)
-
                 async with websockets.connect(
                     BAYSE_WS, ping_interval=20, ping_timeout=20,
                 ) as ws:
-                    # Subscribe to BTC price feed
                     await ws.send(json.dumps({
                         "type": "subscribe",
                         "channel": "asset_prices",
@@ -192,11 +172,10 @@ class BayseFeed:
                     backoff = 1
                     self._connected_at = datetime.now(timezone.utc)
                     self._received_first_tick = False
-                    log.info("BayseFeed connected, subscribed to BTCUSDT")
+                    log.info("BayseFeed connected, subscribed to BTCUSDT (Binance source)")
 
                     while not stop.is_set():
                         raw = await asyncio.wait_for(ws.recv(), timeout=35)
-                        # Bayse WS may batch messages with newline separation
                         for line in raw.split("\n"):
                             if not line.strip():
                                 continue
@@ -212,8 +191,7 @@ class BayseFeed:
                             else:
                                 log.debug("BayseFeed ignoring message type=%s", msg.get("type"))
 
-                        # Only check staleness after we've received at least
-                        # one tick, or after a 10s grace period from connection.
+                        # Only check staleness after first tick or 10s grace period
                         if self._received_first_tick or (
                             self._connected_at
                             and (datetime.now(timezone.utc) - self._connected_at).total_seconds() > 10

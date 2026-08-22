@@ -15,9 +15,9 @@ async def main():
 
     # Shared state — continuously updated by BayseFeed
     state=MarketState()
-    feed=BayseFeed(state)
+    feed=BayseFeed(state, momentum_window_seconds=s.momentum_window_seconds)
 
-    # BTC feed runs as background task; seeds from REST then connects WebSocket
+    # BTC feed runs as background task; builds candle history from WS ticks
     stop=asyncio.Event(); loop=asyncio.get_running_loop()
     for sig in (signal.SIGINT,signal.SIGTERM):
         try: loop.add_signal_handler(sig,stop.set)
