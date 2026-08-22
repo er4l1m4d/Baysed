@@ -43,3 +43,5 @@ The integration follows the official [authentication](https://docs.bayse.markets
 Before any live use, verify with Bayse: exact CLOB book response nesting and per-outcome selection, the precise CLOB order schema accepted for FOK/limit fields, quote authentication requirements, event timestamps/resolution metadata field names, and documented WebSocket/reconciliation response shapes. The bot never invents these values.
 
 No private keys belong in source, fixtures, logs, Markdown, Docker images, or git.
+
+This is Jigz' Version.
