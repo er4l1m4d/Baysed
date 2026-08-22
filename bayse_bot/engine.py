@@ -4,6 +4,7 @@ import asyncio
 from decimal import Decimal
 from .bayse import BayseClient, parse_book, parse_quote
 from .config import Settings
+from .feed import MarketState
 from .market import adapt_market, validate_market
 from .models import BTCFeatures, Outcome, RunMode
 from .records import RunRecorder
@@ -11,8 +12,8 @@ from .risk import RiskManager
 from .strategy import StrategyInput, strategy_by_name
 
 class Bot:
-    def __init__(self, settings:Settings, client:BayseClient, btc_features:BTCFeatures):
-        self.s,self.client,self.btc=settings,client,btc_features;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy)
+    def __init__(self, settings:Settings, client:BayseClient, state:MarketState):
+        self.s,self.client,self.state=settings,client,state;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy)
     async def scan_once(self)->None:
         events=await self.client.events()
         for event in events:
@@ -40,9 +41,9 @@ class Bot:
                 elif b.relative_spread and b.relative_spread>self.s.max_relative_spread: reasons.append("relative_spread_too_wide")
                 elif b.depth_at_or_better("BUY",b.best_ask)<self.s.min_liquidity: reasons.append("insufficient_entry_depth")
             if reasons: self.rec.append("candidates",{"record_type":"candidate","market_id":market.market_id,"reasons":reasons,"book_yes":yes,"book_no":no,"data_quality":"unexecutable_book"});return
-            decision=self.strategy.evaluate(StrategyInput(self.btc,yes.best_ask,no.best_ask),self.s)
+            decision=self.strategy.evaluate(StrategyInput(self.state.btc_features,yes.best_ask,no.best_ask),self.s)
             reasons=list(decision.reasons)+self.risk.approve(market.market_id)
-            record={"record_type":"candidate","experiment_tag":"baseline_unvalidated","strategy":decision.strategy,"strategy_version":"1","market_id":market.market_id,"event_id":market.event_id,"title":market.title,"question":market.question,"engine":market.engine,"currency":market.currency,"resolution_rules":market.resolution_rules,"resolution_source":market.resolution_source,"btc":self.btc,"book_yes":yes,"book_no":no,"decision":decision.approved,"outcome":decision.outcome,"probability":decision.probability,"edge":decision.edge,"signal_strength":decision.strength,"reasons":reasons,"wat_hour":datetime.now().astimezone().hour,"data_quality":"complete"}
+            record={"record_type":"candidate","experiment_tag":"baseline_unvalidated","strategy":decision.strategy,"strategy_version":"1","market_id":market.market_id,"event_id":market.event_id,"title":market.title,"question":market.question,"engine":market.engine,"currency":market.currency,"resolution_rules":market.resolution_rules,"resolution_source":market.resolution_source,"btc":self.state.btc_features,"book_yes":yes,"book_no":no,"decision":decision.approved,"outcome":decision.outcome,"probability":decision.probability,"edge":decision.edge,"signal_strength":decision.strength,"reasons":reasons,"wat_hour":datetime.now().astimezone().hour,"data_quality":"complete"}
             self.rec.append("candidates",record)
             if not decision.approved or reasons or self.s.mode is RunMode.OBSERVATION:return
             await self._execute(market,decision.outcome,yes if decision.outcome is Outcome.YES else no)
