@@ -98,7 +98,7 @@ class Bot:
                 elif b.relative_spread and b.relative_spread>self.s.max_relative_spread: reasons.append("relative_spread_too_wide")
                 elif b.depth_at_or_better("BUY",b.best_ask)<self.s.min_liquidity: reasons.append("insufficient_entry_depth")
             if reasons: self.rec.append("candidates",{"record_type":"candidate","market_id":market.market_id,"reasons":reasons,"book_yes":yes,"book_no":no,"data_quality":"unexecutable_book"});log.info("  book issues: %s", reasons);return
-            decision=self.strategy.evaluate(StrategyInput(self.state.btc_features,yes.best_ask,no.best_ask),self.s)
+            decision=self.strategy.evaluate(StrategyInput(self.state.btc_features,yes.best_ask,no.best_ask,contract),self.s)
             reasons=list(decision.reasons)+self.risk.approve(market.market_id)
             record={"record_type":"candidate","experiment_tag":"baseline_unvalidated","strategy":decision.strategy,"strategy_version":"1","market_id":market.market_id,"event_id":market.event_id,"title":market.title,"question":market.question,"engine":market.engine,"currency":market.currency,"strike_price":market.strike_price,"series_slug":market.series_slug,"resolution_rules":market.resolution_rules,"resolution_source":market.resolution_source,"btc":self.state.btc_features,"contract":contract,"book_yes":yes,"book_no":no,"decision":decision.approved,"outcome":decision.outcome,"probability":decision.probability,"edge":decision.edge,"signal_strength":decision.strength,"reasons":reasons,"wat_hour":datetime.now().astimezone().hour,"data_quality":"complete"}
             self.rec.append("candidates",record)

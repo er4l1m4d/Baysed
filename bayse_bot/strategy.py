@@ -1,18 +1,69 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+import math
 from .config import Settings
+from .contract import ContractState
 from .models import BTCFeatures, Decision, Outcome
 
+# ---------------------------------------------------------------------------
+# Probability helpers
+# ---------------------------------------------------------------------------
+
+def normal_cdf(z: Decimal) -> Decimal:
+    """Standard normal CDF via math.erf (accurate to ~1e-7)."""
+    try:
+        z_float = float(z)
+    except (InvalidOperation, ValueError, OverflowError):
+        return Decimal("0.5")
+    return Decimal(str(0.5 * (1 + math.erf(z_float / math.sqrt(2)))))
+
 def probability_from_momentum(momentum_pct: Decimal) -> Decimal:
-    # Bounded, deliberately simple research model; not a claim of predictive validity.
+    """Legacy momentum-only model. Kept for backward compat."""
     return max(Decimal("0.01"), min(Decimal("0.99"), Decimal("0.5") + momentum_pct * Decimal("4")))
+
+def probability_from_distance_to_strike(
+    distance_pct: Decimal,
+    volatility_pct: Decimal,
+    seconds_remaining: int,
+    total_duration: int = 900,
+) -> Decimal:
+    """Volatility-adjusted distance-to-strike probability model.
+
+    z = distance / expected_move
+    expected_move = volatility * sqrt(time_remaining / total_duration)
+    P(above strike) = normal_cdf(z)
+
+    When BTC is above strike, z > 0 -> probability > 50%.
+    When BTC is below strike, z < 0 -> probability < 50%.
+    """
+    if volatility_pct <= 0 or total_duration <= 0:
+        # No volatility data: fall back to distance-only estimate
+        return max(Decimal("0.01"), min(Decimal("0.99"), Decimal("0.5") + distance_pct * Decimal("4")))
+
+    time_frac = Decimal(str(seconds_remaining)) / Decimal(str(total_duration))
+    expected_move = volatility_pct * time_frac.sqrt() if time_frac > 0 else volatility_pct
+
+    if expected_move <= 0:
+        return max(Decimal("0.01"), min(Decimal("0.99"), Decimal("0.5") + distance_pct * Decimal("4")))
+
+    z = distance_pct / expected_move
+    return max(Decimal("0.01"), min(Decimal("0.99"), normal_cdf(z)))
+
+# ---------------------------------------------------------------------------
+# Strategy input — now includes ContractState
+# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class StrategyInput:
     btc: BTCFeatures
     yes_ask: Decimal
     no_ask: Decimal
+    contract: ContractState | None = None
+
+# ---------------------------------------------------------------------------
+# Base strategy
+# ---------------------------------------------------------------------------
 
 class Strategy:
     name = "base"; version = "1"
@@ -24,6 +75,66 @@ class Strategy:
         if x.btc.volume_ratio < s.volume_multiplier: reasons.append("volume_below_threshold")
         if not s.min_atr <= x.btc.atr_pct <= s.max_atr: reasons.append("atr_out_of_range")
         return reasons
+
+# ---------------------------------------------------------------------------
+# Distance-to-strike model (new primary model)
+# ---------------------------------------------------------------------------
+
+class DistanceToStrikeModel(Strategy):
+    name = "distance_to_strike"
+    version = "2"
+
+    def evaluate(self, x: StrategyInput, s: Settings) -> Decision:
+        reasons = []
+        contract = x.contract
+
+        if not contract:
+            reasons.append("no_contract_state")
+            return Decision(self.name, None, None, None, Decimal("0"), False, tuple(reasons))
+
+        # Compute probability from distance + volatility + time remaining
+        probability = probability_from_distance_to_strike(
+            contract.distance_from_strike_pct,
+            contract.realized_volatility,
+            contract.seconds_remaining,
+        )
+
+        # Signal: YES if probability > 50% (above strike), NO if below
+        outcome = Outcome.YES if probability > Decimal("0.5") else Outcome.NO
+        price = x.yes_ask if outcome is Outcome.YES else x.no_ask
+
+        # Edge: model probability minus market price
+        edge = probability - price if price else None
+
+        # Strength: how far z-score is from 0 (normalized)
+        time_frac = Decimal(str(contract.seconds_remaining)) / Decimal("900")
+        expected_move = contract.realized_volatility * time_frac.sqrt() if time_frac > 0 and contract.realized_volatility > 0 else Decimal("1")
+        strength = abs(contract.distance_from_strike_pct) / expected_move if expected_move > 0 else Decimal("0")
+
+        # Book quality checks
+        if x.yes_ask is None or x.no_ask is None:
+            reasons.append("missing_book_prices")
+
+        # Edge guards
+        if edge is not None and edge < s.min_model_gap:
+            reasons.append("model_edge_below_minimum")
+        if edge is not None and edge > s.max_model_gap:
+            reasons.append("model_edge_above_guardrail")
+        if strength < s.min_strength:
+            reasons.append("signal_strength_below_minimum")
+
+        # Time guard: don't trade in last minute
+        if contract.seconds_remaining < 60:
+            reasons.append("too_close_to_expiry")
+
+        return Decision(
+            self.name, outcome, probability, edge, strength,
+            not reasons, tuple(reasons),
+        )
+
+# ---------------------------------------------------------------------------
+# Legacy momentum strategies (kept for backward compat)
+# ---------------------------------------------------------------------------
 
 class MomentumContinuation(Strategy):
     name="momentum_continuation"
@@ -57,6 +168,6 @@ class Shadow(Strategy):
     def evaluate(self,x,s): return self.wrapped.evaluate(x,s)
 
 def strategy_by_name(name: str) -> Strategy:
-    registry={c.name:c for c in (MeanReversionInversion,MomentumContinuation,DirectBTCMomentum)}
+    registry={c.name:c for c in (DistanceToStrikeModel,MeanReversionInversion,MomentumContinuation,DirectBTCMomentum)}
     if name not in registry: raise ValueError(f"unknown strategy {name}")
     return registry[name]()

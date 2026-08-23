@@ -41,7 +41,7 @@ class Settings:
     min_strength: Decimal = field(default_factory=lambda: _decimal("MIN_SIGNAL_STRENGTH", "0.35"))
     quote_max_age: int = field(default_factory=lambda: int(os.getenv("MAX_EXECUTION_QUOTE_AGE_S", "20")))
     execution_tolerance: Decimal = field(default_factory=lambda: _decimal("EXECUTION_PRICE_TOLERANCE_ABS", "0.01"))
-    strategy: str = field(default_factory=lambda: os.getenv("STRATEGY", "mean_reversion_inversion"))
+    strategy: str = field(default_factory=lambda: os.getenv("STRATEGY", "distance_to_strike"))
     btc_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("BTC_MATCH_TERMS", "btc,bitcoin").split(",")))
     resolution_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("RESOLUTION_REQUIRED_TERMS", "binance,btc").split(",")))
     series_slug: str = field(default_factory=lambda: os.getenv("SERIES_SLUG", "crypto-btc-15min"))
