@@ -5,6 +5,7 @@ from decimal import Decimal
 from .bayse import BayseClient, parse_book, parse_quote
 from .bayse_market_ws import BayseMarketFeed
 from .config import Settings
+from .contract import ContractState, build_contract_state
 from .feed import MarketState
 from .market import adapt_market, validate_market
 from .models import BTCFeatures, Market, Outcome, RunMode
@@ -80,6 +81,15 @@ class Bot:
             yes=parse_book(books_raw[0],market.market_id,Outcome.YES)
             no=parse_book(books_raw[1],market.market_id,Outcome.NO)
 
+            # Build contract state
+            spread = yes.spread
+            contract = build_contract_state(market, self.state.btc_features, yes.best_ask, no.best_ask, spread)
+            if contract:
+                log.info("  contract: strike=$%s BTC=$%s dist=%.3f%% above=%s time_left=%ds/%ds",
+                    contract.strike_price, contract.current_btc_price,
+                    contract.distance_from_strike_pct, contract.is_above_strike,
+                    contract.seconds_remaining, contract.seconds_elapsed + contract.seconds_remaining)
+
             reasons=[]
             for b in (yes,no):
                 if not b.best_ask or not b.best_bid: reasons.append("empty_book")
@@ -90,7 +100,7 @@ class Bot:
             if reasons: self.rec.append("candidates",{"record_type":"candidate","market_id":market.market_id,"reasons":reasons,"book_yes":yes,"book_no":no,"data_quality":"unexecutable_book"});log.info("  book issues: %s", reasons);return
             decision=self.strategy.evaluate(StrategyInput(self.state.btc_features,yes.best_ask,no.best_ask),self.s)
             reasons=list(decision.reasons)+self.risk.approve(market.market_id)
-            record={"record_type":"candidate","experiment_tag":"baseline_unvalidated","strategy":decision.strategy,"strategy_version":"1","market_id":market.market_id,"event_id":market.event_id,"title":market.title,"question":market.question,"engine":market.engine,"currency":market.currency,"strike_price":market.strike_price,"series_slug":market.series_slug,"resolution_rules":market.resolution_rules,"resolution_source":market.resolution_source,"btc":self.state.btc_features,"book_yes":yes,"book_no":no,"decision":decision.approved,"outcome":decision.outcome,"probability":decision.probability,"edge":decision.edge,"signal_strength":decision.strength,"reasons":reasons,"wat_hour":datetime.now().astimezone().hour,"data_quality":"complete"}
+            record={"record_type":"candidate","experiment_tag":"baseline_unvalidated","strategy":decision.strategy,"strategy_version":"1","market_id":market.market_id,"event_id":market.event_id,"title":market.title,"question":market.question,"engine":market.engine,"currency":market.currency,"strike_price":market.strike_price,"series_slug":market.series_slug,"resolution_rules":market.resolution_rules,"resolution_source":market.resolution_source,"btc":self.state.btc_features,"contract":contract,"book_yes":yes,"book_no":no,"decision":decision.approved,"outcome":decision.outcome,"probability":decision.probability,"edge":decision.edge,"signal_strength":decision.strength,"reasons":reasons,"wat_hour":datetime.now().astimezone().hour,"data_quality":"complete"}
             self.rec.append("candidates",record)
             log.info("  %s | YES ask=%s NO ask=%s | model=%.2f%% edge=%s | %s %s", market.title[:30], yes.best_ask, no.best_ask, (decision.probability or 0)*100, decision.edge, decision.outcome, "APPROVED" if decision.approved and not reasons else f"REJECTED: {reasons}")
             if not decision.approved or reasons or self.s.mode is RunMode.OBSERVATION:return
