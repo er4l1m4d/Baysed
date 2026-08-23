@@ -2,8 +2,14 @@ from __future__ import annotations
 import argparse,asyncio,logging,signal
 
 async def main():
-    parser=argparse.ArgumentParser();parser.add_argument("--report",metavar="RUN_DIR");parser.add_argument("--health",action="store_true");args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument("--report",metavar="RUN_DIR");parser.add_argument("--health",action="store_true");parser.add_argument("--calibrate",metavar="RUN_DIR",help="Run calibration report on resolved predictions");parser.add_argument("--tune",metavar="RUN_DIR",help="Suggest parameter adjustments based on calibration data");args=parser.parse_args()
     if args.health: print('{"status":"ok","orders_submitted":false}');return
+    if args.tune:
+        from .calibration import suggest_parameter_adjustments
+        print(suggest_parameter_adjustments(__import__('pathlib').Path(args.tune)));return
+    if args.calibrate:
+        from .calibration import generate_report
+        print(generate_report(__import__('pathlib').Path(args.calibrate)));return
     if args.report:
         from .reporting import report
         print(report(__import__('pathlib').Path(args.report)));return
