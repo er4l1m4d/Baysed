@@ -44,6 +44,7 @@ class Settings:
     strategy: str = field(default_factory=lambda: os.getenv("STRATEGY", "mean_reversion_inversion"))
     btc_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("BTC_MATCH_TERMS", "btc,bitcoin").split(",")))
     resolution_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("RESOLUTION_REQUIRED_TERMS", "binance,btc").split(",")))
+    series_slug: str = field(default_factory=lambda: os.getenv("SERIES_SLUG", "crypto-btc-15min"))
 
     def validate_live(self) -> None:
         if self.mode is RunMode.LIVE and (not self.public_key or not self.secret_key):

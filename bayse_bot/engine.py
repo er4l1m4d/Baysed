@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import asyncio, logging
 from decimal import Decimal
 from .bayse import BayseClient, parse_book, parse_quote
+from .bayse_market_ws import BayseMarketFeed
 from .config import Settings
 from .feed import MarketState
 from .market import adapt_market, validate_market
@@ -28,11 +29,23 @@ def _book_index(market: Market, outcome: Outcome) -> int:
     return 1
 
 class Bot:
-    def __init__(self, settings:Settings, client:BayseClient, state:MarketState):
-        self.s,self.client,self.state=settings,client,state;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy)
+    def __init__(self, settings:Settings, client:BayseClient, state:MarketState, market_feed:BayseMarketFeed|None=None):
+        self.s,self.client,self.state,self.market_feed=settings,client,state,market_feed;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy)
     async def scan_once(self)->None:
-        events=await self.client.events()
-        log.info("scan: %d open events", len(events))
+        # Primary: series-based discovery (faster, more precise)
+        # Fallback: full event scan (if series fails or returns nothing)
+        events = []
+        try:
+            events = await self.client.events_by_series(self.s.series_slug)
+            if events:
+                log.info("scan: series=%s -> %d events", self.s.series_slug, len(events))
+        except Exception as exc:
+            log.warning("series discovery failed: %s: %s, falling back to full scan", type(exc).__name__, exc)
+
+        if not events:
+            events = await self.client.events()
+            log.info("scan: full scan -> %d open events", len(events))
+
         for event in events:
             for raw_market in event.get("markets",[]):
                 market=adapt_market(event,raw_market); reasons=validate_market(market,self.s)

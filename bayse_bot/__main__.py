@@ -8,28 +8,31 @@ async def main():
         from .reporting import report
         print(report(__import__('pathlib').Path(args.report)));return
     from .bayse import BayseClient
+    from .bayse_market_ws import BayseMarketFeed
     from .config import Settings
     from .engine import Bot
     from .feed import BayseFeed, MarketState
     s=Settings();s.validate_live();logging.basicConfig(level=logging.INFO,format='%(message)s')
 
-    # Shared state — continuously updated by BayseFeed
+    # Shared state — continuously updated by feeds
     state=MarketState()
     feed=BayseFeed(state, momentum_window_seconds=s.momentum_window_seconds)
+    market_feed=BayseMarketFeed()
 
-    # BTC feed runs as background task; builds candle history from WS ticks
+    # BTC feed + market data feed run as background tasks
     stop=asyncio.Event(); loop=asyncio.get_running_loop()
     for sig in (signal.SIGINT,signal.SIGTERM):
         try: loop.add_signal_handler(sig,stop.set)
         except NotImplementedError: pass
 
     btc_task=asyncio.create_task(feed.run(stop))
+    market_task=asyncio.create_task(market_feed.run(stop))
 
-    # Wait briefly for initial data to arrive before starting the bot loop
+    # Wait briefly for initial BTC data to arrive before starting the bot loop
     for _ in range(50):
         if feed.last_price: break
         await asyncio.sleep(0.1)
 
     async with BayseClient(s.bayse_base_url,s.public_key,s.secret_key) as client:
-        await Bot(s,client,state).run(stop)
+        await Bot(s,client,state,market_feed).run(stop)
 if __name__=="__main__":asyncio.run(main())

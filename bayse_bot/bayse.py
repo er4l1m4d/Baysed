@@ -66,6 +66,22 @@ class BayseClient:
 
     async def events(self) -> list[dict[str, Any]]:
         return self._event_list(await self.request("GET", "/v1/pm/events?status=open", authenticated=bool(self.public_key)))
+    async def events_by_series(self, slug: str) -> list[dict[str, Any]]:
+        """Fetch open events filtered by seriesSlug (e.g. crypto-btc-15min)."""
+        return self._event_list(await self.request("GET", f"/v1/pm/events?seriesSlug={slug}&status=open", authenticated=bool(self.public_key)))
+    async def series_events(self, slug: str) -> list[dict[str, Any]]:
+        """Fetch lean events for a series (lightweight, no full market details)."""
+        raw = await self.request("GET", f"/v1/pm/events/series/{slug}/lean-events")
+        if isinstance(raw, list): return raw
+        return raw.get("events", raw.get("data", []))
+    async def trades(self, market_id: str) -> list[dict[str, Any]]:
+        """Fetch recent trades for a market."""
+        raw = await self.request("GET", f"/v1/pm/trades?marketId={market_id}")
+        if isinstance(raw, list): return raw
+        return raw.get("trades", raw.get("data", []))
+    async def ticker(self, market_id: str) -> dict[str, Any]:
+        """Fetch real-time ticker for a market."""
+        return await self.request("GET", f"/v1/pm/markets/{market_id}/ticker")
     @staticmethod
     def _event_list(payload: dict[str, Any]) -> list[dict[str, Any]]: return payload.get("events", payload.get("data", []))
     async def book(self, outcome_ids: list[str]) -> list[dict[str, Any]]:
