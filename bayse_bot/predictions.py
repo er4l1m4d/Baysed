@@ -11,7 +11,7 @@ Recorded fields:
   - Actual resolution (populated later via outcome API)
 """
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import StrEnum
