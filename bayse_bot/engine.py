@@ -9,6 +9,7 @@ from .contract import ContractState, build_contract_state
 from .feed import MarketState
 from .market import adapt_market, validate_market
 from .models import BTCFeatures, Market, Outcome, RunMode
+from .predictions import PredictionRecord, PredictionRecorder
 from .records import RunRecorder
 from .risk import RiskManager
 from .strategy import StrategyInput, strategy_by_name
@@ -31,7 +32,7 @@ def _book_index(market: Market, outcome: Outcome) -> int:
 
 class Bot:
     def __init__(self, settings:Settings, client:BayseClient, state:MarketState, market_feed:BayseMarketFeed|None=None):
-        self.s,self.client,self.state,self.market_feed=settings,client,state,market_feed;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy)
+        self.s,self.client,self.state,self.market_feed=settings,client,state,market_feed;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy);self.pred_rec=PredictionRecorder(settings.runs_dir / "predictions")
     async def scan_once(self)->None:
         # Primary: series-based discovery (faster, more precise)
         # Fallback: full event scan (if series fails or returns nothing)
@@ -100,6 +101,34 @@ class Bot:
             if reasons: self.rec.append("candidates",{"record_type":"candidate","market_id":market.market_id,"reasons":reasons,"book_yes":yes,"book_no":no,"data_quality":"unexecutable_book"});log.info("  book issues: %s", reasons);return
             decision=self.strategy.evaluate(StrategyInput(self.state.btc_features,yes.best_ask,no.best_ask,contract),self.s)
             reasons=list(decision.reasons)+self.risk.approve(market.market_id)
+
+            # Record every prediction (regardless of approval)
+            if contract:
+                pred = PredictionRecord(
+                    market_id=market.market_id,
+                    event_id=market.event_id,
+                    title=market.title,
+                    strike_price=contract.strike_price,
+                    current_btc_price=contract.current_btc_price,
+                    distance_from_strike_pct=contract.distance_from_strike_pct,
+                    is_above_strike=contract.is_above_strike,
+                    seconds_remaining=contract.seconds_remaining,
+                    seconds_elapsed=contract.seconds_elapsed,
+                    realized_volatility=contract.realized_volatility,
+                    momentum_pct=contract.momentum_pct,
+                    yes_ask=yes.best_ask,
+                    no_ask=no.best_ask,
+                    spread=contract.spread,
+                    strategy=decision.strategy,
+                    probability=decision.probability,
+                    predicted_outcome=decision.outcome.value if decision.outcome else "",
+                    edge=decision.edge,
+                    signal_strength=decision.strength,
+                    approved=decision.approved,
+                    reasons=reasons,
+                )
+                self.pred_rec.record(pred)
+
             record={"record_type":"candidate","experiment_tag":"baseline_unvalidated","strategy":decision.strategy,"strategy_version":"1","market_id":market.market_id,"event_id":market.event_id,"title":market.title,"question":market.question,"engine":market.engine,"currency":market.currency,"strike_price":market.strike_price,"series_slug":market.series_slug,"resolution_rules":market.resolution_rules,"resolution_source":market.resolution_source,"btc":self.state.btc_features,"contract":contract,"book_yes":yes,"book_no":no,"decision":decision.approved,"outcome":decision.outcome,"probability":decision.probability,"edge":decision.edge,"signal_strength":decision.strength,"reasons":reasons,"wat_hour":datetime.now().astimezone().hour,"data_quality":"complete"}
             self.rec.append("candidates",record)
             log.info("  %s | YES ask=%s NO ask=%s | model=%.2f%% edge=%s | %s %s", market.title[:30], yes.best_ask, no.best_ask, (decision.probability or 0)*100, decision.edge, decision.outcome, "APPROVED" if decision.approved and not reasons else f"REJECTED: {reasons}")
