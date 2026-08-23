@@ -31,7 +31,9 @@ class BayseClient:
         self._owned_session = session is None
 
     async def __aenter__(self):
-        if self.session is None: self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+        if self.session is None:
+            connector = aiohttp.TCPConnector(resolver=aiohttp.resolver.DefaultResolver())
+            self.session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15))
         return self
     async def __aexit__(self, *_):
         if self._owned_session and self.session: await self.session.close()
