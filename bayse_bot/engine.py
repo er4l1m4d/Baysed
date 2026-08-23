@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-import asyncio
+import asyncio, logging
 from decimal import Decimal
 from .bayse import BayseClient, parse_book, parse_quote
 from .config import Settings
@@ -10,6 +10,8 @@ from .models import BTCFeatures, Outcome, RunMode
 from .records import RunRecorder
 from .risk import RiskManager
 from .strategy import StrategyInput, strategy_by_name
+
+log = logging.getLogger(__name__)
 
 class Bot:
     def __init__(self, settings:Settings, client:BayseClient, state:MarketState):
@@ -25,7 +27,7 @@ class Bot:
         """Worker loop. Individual scan failures are logged, never converted into trades."""
         while not stop.is_set():
             try: await self.scan_once()
-            except Exception as exc: self.rec.log("scan_failure",error=type(exc).__name__,detail=str(exc))
+            except Exception as exc: log.warning("scan_failure: %s: %s", type(exc).__name__, exc); self.rec.log("scan_failure",error=type(exc).__name__,detail=str(exc))
             try: await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
             except asyncio.TimeoutError: pass
     async def evaluate_market(self,market):
