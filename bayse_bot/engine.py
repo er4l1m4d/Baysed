@@ -11,6 +11,7 @@ from .market import adapt_market, validate_market
 from .models import BTCFeatures, Market, Outcome, RunMode
 from .predictions import PredictionRecord, PredictionRecorder
 from .records import RunRecorder
+from .resolution import ResolutionTracker
 from .risk import RiskManager
 from .strategy import StrategyInput, strategy_by_name
 
@@ -32,8 +33,11 @@ def _book_index(market: Market, outcome: Outcome) -> int:
 
 class Bot:
     def __init__(self, settings:Settings, client:BayseClient, state:MarketState, market_feed:BayseMarketFeed|None=None):
-        self.s,self.client,self.state,self.market_feed=settings,client,state,market_feed;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy);self.pred_rec=PredictionRecorder(settings.runs_dir / "predictions")
+        self.s,self.client,self.state,self.market_feed=settings,client,state,market_feed;self.rec=RunRecorder(settings.runs_dir,settings.mode);self.risk=RiskManager(settings);self.strategy=strategy_by_name(settings.strategy);self.pred_rec=PredictionRecorder(settings.runs_dir / "predictions");self.resolver=ResolutionTracker(settings.runs_dir / "predictions")
     async def scan_once(self)->None:
+        # Check for resolved predictions first
+        await self._check_resolutions()
+
         # Primary: series-based discovery (faster, more precise)
         # Fallback: full event scan (if series fails or returns nothing)
         events = []
@@ -64,6 +68,24 @@ class Bot:
             except Exception as exc: log.warning("scan_failure: %s: %s", type(exc).__name__, exc); self.rec.log("scan_failure",error=type(exc).__name__,detail=str(exc))
             try: await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
             except asyncio.TimeoutError: pass
+    async def _check_resolutions(self) -> None:
+        """Check for resolved predictions and update records."""
+        try:
+            resolved_events = await self.client.resolved_events(self.s.series_slug)
+            if not resolved_events:
+                return
+
+            resolved_count = self.resolver.resolve_from_events(resolved_events)
+            if resolved_count > 0:
+                log.info("resolved %d predictions", resolved_count)
+
+                # Log calibration stats periodically
+                stats = self.resolver.calibration_stats()
+                if stats["resolved"] > 0:
+                    log.info("calibration: %d/%d resolved brier_mean=%s",
+                        stats["resolved"], stats["total"], stats["brier_mean"])
+        except Exception as exc:
+            log.warning("resolution_check_failed: %s: %s", type(exc).__name__, exc)
     async def evaluate_market(self,market):
         try:
             # Fetch both outcome books in one call using outcome IDs
