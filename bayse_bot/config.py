@@ -14,7 +14,7 @@ class Settings:
     bayse_base_url: str = field(default_factory=lambda: os.getenv("BAYSE_BASE_URL", "https://relay.bayse.markets").rstrip("/"))
     public_key: str = field(default_factory=lambda: os.getenv("BAYSE_PUBLIC_KEY", ""))
     secret_key: str = field(default_factory=lambda: os.getenv("BAYSE_SECRET_KEY", ""))
-    currency: str = field(default_factory=lambda: os.getenv("TRADE_CURRENCY", "NGN").upper())
+    currency: str = field(default_factory=lambda: os.getenv("TRADE_CURRENCY", "USD").upper())
     windows: str = field(default_factory=lambda: os.getenv("TRADING_WINDOWS", "14:00-22:00"))
     position_size: Decimal = field(default_factory=lambda: _decimal("POSITION_SIZE_NGN", "100"))
     max_trades: int = field(default_factory=lambda: int(os.getenv("MAX_TRADES_PER_DAY", "0")))
@@ -43,7 +43,7 @@ class Settings:
     execution_tolerance: Decimal = field(default_factory=lambda: _decimal("EXECUTION_PRICE_TOLERANCE_ABS", "0.01"))
     strategy: str = field(default_factory=lambda: os.getenv("STRATEGY", "mean_reversion_inversion"))
     btc_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("BTC_MATCH_TERMS", "btc,bitcoin").split(",")))
-    resolution_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("RESOLUTION_REQUIRED_TERMS", "bybit,btc").split(",")))
+    resolution_terms: tuple[str, ...] = field(default_factory=lambda: tuple(x.strip().lower() for x in os.getenv("RESOLUTION_REQUIRED_TERMS", "binance,btc").split(",")))
 
     def validate_live(self) -> None:
         if self.mode is RunMode.LIVE and (not self.public_key or not self.secret_key):

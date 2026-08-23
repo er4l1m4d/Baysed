@@ -68,7 +68,13 @@ class BayseClient:
         return self._event_list(await self.request("GET", "/v1/pm/events?status=open", authenticated=bool(self.public_key)))
     @staticmethod
     def _event_list(payload: dict[str, Any]) -> list[dict[str, Any]]: return payload.get("events", payload.get("data", []))
-    async def book(self, market_id: str) -> dict[str, Any]: return await self.request("GET", f"/v1/pm/books?marketId={market_id}")
+    async def book(self, outcome_ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch order books for one or more outcome IDs. Returns list of book dicts."""
+        params = "&".join(f"outcomeId[]={oid}" for oid in outcome_ids)
+        raw = await self.request("GET", f"/v1/pm/books?{params}")
+        # Response is an array, but request() wraps non-dict in {"data": [...]}
+        if isinstance(raw, list): return raw
+        return raw.get("data", raw.get("books", []))
     async def quote(self, event_id: str, market_id: str, body: dict[str, Any]) -> dict[str, Any]: return await self.request("POST", f"/v1/pm/events/{event_id}/markets/{market_id}/quote", body, authenticated=bool(self.public_key), signed=bool(self.secret_key), retries=0)
     async def place_order(self, event_id: str, market_id: str, body: dict[str, Any]) -> dict[str, Any]:
         # Never retried: caller must poll/reconcile after an ambiguous outcome.
@@ -79,10 +85,9 @@ class BayseClient:
     async def cancel(self, order_id: str) -> dict[str, Any]: return await self.request("DELETE", f"/v1/pm/orders/{order_id}", authenticated=True, signed=True, retries=0)
 
 def parse_book(payload: dict[str, Any], market_id: str, outcome: Outcome) -> OrderBook:
-    """Adapter supports documented endpoint but rejects absent/ambiguous book shapes. TODO: verify live response nesting from Bayse docs/account."""
-    source = payload.get("book", payload)
+    """Parse a single order book dict from the Bayse API response."""
     def levels(name: str, reverse: bool) -> tuple[BookLevel, ...]:
-        raw = source.get(name, [])
+        raw = payload.get(name, [])
         parsed = [BookLevel(_d(x.get("price") if isinstance(x, dict) else x[0]), _d(x.get("quantity", x.get("size")) if isinstance(x, dict) else x[1])) for x in raw]
         return tuple(sorted(parsed, key=lambda x: x.price, reverse=reverse))
     captured = datetime.now(timezone.utc)

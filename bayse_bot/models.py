@@ -50,6 +50,10 @@ class Market:
     closes_at: datetime | None
     resolution_rules: str | None
     resolution_source: str | None
+    strike_price: Decimal | None = None
+    series_slug: str | None = None
+    outcome1_id: str | None = None
+    outcome2_id: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
