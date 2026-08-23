@@ -32,7 +32,7 @@ class BayseClient:
 
     async def __aenter__(self):
         if self.session is None:
-            connector = aiohttp.TCPConnector(resolver=aiohttp.resolver.DefaultResolver())
+            connector = aiohttp.TCPConnector(resolver=aiohttp.resolver.ThreadedResolver())
             self.session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15))
         return self
     async def __aexit__(self, *_):
