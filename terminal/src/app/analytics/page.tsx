@@ -1,36 +1,34 @@
 "use client";
 
-const calibrationData = [
-  { bucket: "0-10%", count: 5, avgPredicted: 0.065, actualRate: 0.0, gap: 0.065 },
-  { bucket: "10-20%", count: 8, avgPredicted: 0.152, actualRate: 0.125, gap: 0.027 },
-  { bucket: "20-30%", count: 12, avgPredicted: 0.248, actualRate: 0.25, gap: -0.002 },
-  { bucket: "30-40%", count: 15, avgPredicted: 0.351, actualRate: 0.333, gap: 0.018 },
-  { bucket: "40-50%", count: 18, avgPredicted: 0.452, actualRate: 0.444, gap: 0.008 },
-  { bucket: "50-60%", count: 20, avgPredicted: 0.548, actualRate: 0.55, gap: -0.002 },
-  { bucket: "60-70%", count: 16, avgPredicted: 0.649, actualRate: 0.625, gap: 0.024 },
-  { bucket: "70-80%", count: 10, avgPredicted: 0.751, actualRate: 0.7, gap: 0.051 },
-  { bucket: "80-90%", count: 6, avgPredicted: 0.848, actualRate: 0.833, gap: 0.015 },
-  { bucket: "90-100%", count: 3, avgPredicted: 0.935, actualRate: 1.0, gap: -0.065 },
-];
+import { useCalibration, useBotStatus } from "@/hooks/useBayseData";
 
-function CalibrationChart() {
+function CalibrationChart({ curve }: { curve: { bucket: string; count: number; avg_predicted: number; actual_rate: number; gap: number }[] }) {
+  if (!curve || curve.length === 0) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4">Calibration Curve</h3>
+        <div className="text-center text-gray-500 py-8">No calibration data yet</div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
       <h3 className="text-lg font-semibold mb-4">Calibration Curve</h3>
       <div className="space-y-2">
-        {calibrationData.map((d) => (
+        {curve.map((d) => (
           <div key={d.bucket} className="flex items-center gap-3">
             <div className="w-20 text-xs text-gray-400 text-right">{d.bucket}</div>
             <div className="flex-1 h-6 bg-gray-800 rounded relative overflow-hidden">
               {/* Actual rate bar */}
               <div
                 className="absolute inset-y-0 left-0 bg-emerald-600 rounded"
-                style={{ width: `${d.actualRate * 100}%` }}
+                style={{ width: `${d.actual_rate * 100}%` }}
               />
               {/* Predicted rate marker */}
               <div
                 className="absolute inset-y-0 w-0.5 bg-yellow-400"
-                style={{ left: `${d.avgPredicted * 100}%` }}
+                style={{ left: `${d.avg_predicted * 100}%` }}
               />
             </div>
             <div className="w-16 text-xs text-gray-400">
@@ -54,13 +52,21 @@ function CalibrationChart() {
 }
 
 function MetricsGrid() {
+  const { status } = useBotStatus();
+  const { calibration } = useCalibration();
+
+  const accuracy = status?.accuracy ? `${(status.accuracy * 100).toFixed(1)}%` : "--";
+  const brier = status?.brier_mean ? status.brier_mean.toFixed(4) : "--";
+  const total = status?.total_predictions || 0;
+  const resolved = status?.total_resolved || 0;
+
   const metrics = [
-    { label: "Brier Score", value: "0.1891", status: "good", desc: "Below 0.25 threshold" },
-    { label: "Accuracy", value: "62.2%", status: "good", desc: "Above random chance" },
-    { label: "Total Predictions", value: "150", status: "neutral", desc: "All time" },
-    { label: "Resolved", value: "45", status: "neutral", desc: "30% resolution rate" },
-    { label: "Avg Edge", value: "0.0312", status: "good", desc: "Positive edge detected" },
-    { label: "Calibration Bias", value: "Overconfident", status: "warning", desc: "Suggest increasing vol scaling" },
+    { label: "Brier Score", value: brier, status: status?.brier_mean && status.brier_mean < 0.25 ? "good" : "neutral", desc: "Lower is better (0 = perfect)" },
+    { label: "Accuracy", value: accuracy, status: status?.accuracy && status.accuracy > 0.5 ? "good" : "neutral", desc: "Fraction of correct predictions" },
+    { label: "Total Predictions", value: String(total), status: "neutral", desc: "All time" },
+    { label: "Resolved", value: String(resolved), status: "neutral", desc: `${total > 0 ? ((resolved / total) * 100).toFixed(0) : 0}% resolution rate` },
+    { label: "Avg Edge", value: "--", status: "neutral", desc: "Model edge vs market" },
+    { label: "Calibration Bias", value: calibration?.calibration_curve?.length ? "Measuring..." : "No data", status: "neutral", desc: "Will improve with more data" },
   ];
 
   return (
@@ -87,52 +93,21 @@ function MetricsGrid() {
   );
 }
 
-function EdgeDecayChart() {
-  const data = [
-    { time: "0-60s", accuracy: 0.45, count: 3 },
-    { time: "60-120s", accuracy: 0.52, count: 5 },
-    { time: "120-180s", accuracy: 0.58, count: 8 },
-    { time: "180-240s", accuracy: 0.62, count: 10 },
-    { time: "240-300s", accuracy: 0.65, count: 12 },
-    { time: "300-360s", accuracy: 0.68, count: 15 },
-    { time: "360-420s", accuracy: 0.72, count: 18 },
-    { time: "420-480s", accuracy: 0.75, count: 20 },
-    { time: "480-540s", accuracy: 0.78, count: 22 },
-    { time: "540-600s", accuracy: 0.82, count: 25 },
-  ];
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Edge Decay by Time Remaining</h3>
-      <div className="h-48 flex items-end gap-1">
-        {data.map((d) => (
-          <div key={d.time} className="flex-1 flex flex-col items-center">
-            <div
-              className="w-full bg-emerald-600 rounded-t"
-              style={{ height: `${d.accuracy * 100}%` }}
-            />
-            <div className="text-[10px] text-gray-500 mt-1 rotate-45 origin-left">
-              {d.time}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="text-xs text-gray-500 mt-4 text-center">
-        Accuracy improves with more time remaining (early entry is better)
-      </div>
-    </div>
-  );
-}
-
 export default function Analytics() {
+  const { calibration, loading } = useCalibration();
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Model Analytics</h1>
-      <MetricsGrid />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <CalibrationChart />
-        <EdgeDecayChart />
-      </div>
+
+      {loading ? (
+        <div className="text-gray-500">Loading analytics...</div>
+      ) : (
+        <>
+          <MetricsGrid />
+          <CalibrationChart curve={calibration?.calibration_curve || []} />
+        </>
+      )}
     </div>
   );
 }

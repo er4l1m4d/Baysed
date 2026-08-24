@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTrades, useBotStatus } from "@/hooks/useBayseData";
 
 function OrderForm() {
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
@@ -150,67 +151,88 @@ function OrderForm() {
   );
 }
 
-function OpenOrders() {
+function TradeHistory() {
+  const { trades, loading } = useTrades(20);
+
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Open Orders</h3>
-      <div className="text-center text-gray-500 py-8">No open orders</div>
+      <h3 className="text-lg font-semibold mb-4">Trade History</h3>
+      {loading ? (
+        <div className="text-gray-500">Loading trades...</div>
+      ) : trades.length === 0 ? (
+        <div className="text-center text-gray-500 py-8">No trades yet</div>
+      ) : (
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {trades.map((trade) => (
+            <div
+              key={trade.id}
+              className="flex justify-between items-center py-2 border-b border-gray-800"
+            >
+              <div>
+                <div className="text-sm font-medium">
+                  {trade.side} {trade.outcome}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {new Date(trade.recorded_at).toLocaleString()}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-mono">${trade.amount}</div>
+                <div className="text-xs text-gray-500">@ {trade.price}</div>
+              </div>
+              <div>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded ${
+                    trade.status === "filled"
+                      ? "bg-emerald-900 text-emerald-400"
+                      : trade.status === "pending"
+                        ? "bg-yellow-900 text-yellow-400"
+                        : "bg-gray-800 text-gray-400"
+                  }`}
+                >
+                  {trade.status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function PositionSummary() {
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Positions</h3>
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        <div>
-          <div className="text-xs text-gray-500">Open Positions</div>
-          <div className="text-xl font-bold text-white">0</div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">Total Value</div>
-          <div className="text-xl font-bold text-white">$0.00</div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">Unrealized PnL</div>
-          <div className="text-xl font-bold text-emerald-400">$0.00</div>
-        </div>
-      </div>
-      <div className="text-center text-gray-500 py-4">No active positions</div>
-    </div>
-  );
-}
+  const { status } = useBotStatus();
 
-function MarketInfo() {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Current Market</h3>
+      <h3 className="text-lg font-semibold mb-4">Bot Status</h3>
       <div className="space-y-3">
         <div className="flex justify-between">
-          <span className="text-gray-400">Market</span>
-          <span>Bitcoin Up or Down - 15 min</span>
+          <span className="text-gray-400">Mode</span>
+          <span className="font-mono">{status?.mode || "observation"}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-400">Strike Price</span>
-          <span className="font-mono">$77,050.02</span>
+          <span className="text-gray-400">Strategy</span>
+          <span className="font-mono">{status?.strategy || "distance_to_strike"}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-400">Time Remaining</span>
-          <span className="font-mono">14:23</span>
+          <span className="text-gray-400">Uptime</span>
+          <span className="font-mono">
+            {status?.uptime_seconds
+              ? `${Math.floor(status.uptime_seconds / 3600)}h ${Math.floor((status.uptime_seconds % 3600) / 60)}m`
+              : "0h 0m"}
+          </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-400">UP Price</span>
-          <span className="font-mono text-emerald-400">$0.58</span>
+          <span className="text-gray-400">Errors</span>
+          <span className="font-mono">{status?.error_count || 0}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">DOWN Price</span>
-          <span className="font-mono text-red-400">$0.42</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Spread</span>
-          <span className="font-mono">$0.04</span>
-        </div>
+        {status?.last_error && (
+          <div className="mt-2 p-2 bg-red-900/30 rounded text-xs text-red-400">
+            {status.last_error}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -224,10 +246,9 @@ export default function Trading() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <OrderForm />
-          <OpenOrders />
+          <TradeHistory />
         </div>
         <div className="space-y-6">
-          <MarketInfo />
           <PositionSummary />
         </div>
       </div>
