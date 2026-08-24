@@ -1,0 +1,34 @@
+services:
+  # API Server + Bot Worker
+  - type: web
+    name: bayse-bot-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m api.run
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BOT_RUN_MODE
+        value: observation
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bayse-db
+          property: connectionString
+      - key: BAYSE_BASE_URL
+        sync: false
+      - key: BAYSE_PUBLIC_KEY
+        sync: false
+      - key: BAYSE_SECRET_KEY
+        sync: false
+      - key: SERIES_SLUG
+        value: crypto-btc-15min
+      - key: TRADE_CURRENCY
+        value: USD
+    healthCheckPath: /health
+
+  # PostgreSQL Database
+  - type: postgresql
+    name: bayse-db
+    plan: starter
+    databaseName: bayse_bot
