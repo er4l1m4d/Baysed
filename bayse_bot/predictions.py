@@ -4,20 +4,17 @@ Every evaluated market is recorded as a PredictionRecord, regardless of
 whether the strategy approved or rejected it. This is the raw training
 data for the probability model.
 
-Recorded fields:
-  - Contract state (strike, distance, time remaining, volatility)
-  - Market book prices (yes_ask, no_ask, spread)
-  - Strategy output (probability, edge, outcome, reasons)
-  - Actual resolution (populated later via outcome API)
+Now uses repository pattern for persistence (PostgreSQL in production,
+SQLite for local development).
 """
 from __future__ import annotations
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
-import json
-from pathlib import Path
+
+from .repositories.interfaces import PredictionRepository
 
 
 class PredictionOutcome(StrEnum):
@@ -64,35 +61,57 @@ class PredictionRecord:
     # Metadata
     strategy_version: str = "2"
     experiment_tag: str = "distance_to_strike_v1"
-    recorded_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = None
 
     # Resolution (populated later)
     outcome_resolution: str = "pending"  # "pending" | "yes_won" | "no_won"
     actual_price: Decimal | None = None  # BTC price at resolution
 
+    def __post_init__(self):
+        if self.recorded_at is None:
+            self.recorded_at = datetime.now(timezone.utc)
 
-def prediction_to_dict(pred: PredictionRecord) -> dict:
-    """Convert to JSON-serializable dict."""
-    d = asdict(pred)
-    d["recorded_at"] = pred.recorded_at.isoformat()
-    for k, v in d.items():
-        if isinstance(v, Decimal):
-            d[k] = str(v)
-        elif isinstance(v, tuple):
-            d[k] = list(v)
-    return d
+    def to_db_dict(self) -> dict[str, Any]:
+        """Convert to dictionary suitable for database insertion."""
+        d = asdict(self)
+        # Convert Decimal to string for PostgreSQL
+        for k, v in d.items():
+            if isinstance(v, Decimal):
+                d[k] = str(v)
+            elif isinstance(v, tuple):
+                d[k] = list(v)
+            elif isinstance(v, datetime):
+                d[k] = v
+        return d
 
 
 class PredictionRecorder:
-    """Append-only JSONL writer for predictions."""
+    """Records predictions to database via repository."""
 
-    def __init__(self, root: Path):
-        self.root = root
-        self.root.mkdir(parents=True, exist_ok=True)
+    def __init__(self, repository: PredictionRepository):
+        self.repository = repository
 
-    def record(self, pred: PredictionRecord) -> None:
-        """Append one prediction to predictions.jsonl."""
-        path = self.root / "predictions.jsonl"
-        item = prediction_to_dict(pred)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(item, sort_keys=True, ensure_ascii=False) + "\n")
+    async def record(self, pred: PredictionRecord) -> None:
+        """Save one prediction to database."""
+        await self.repository.save_prediction(pred.to_db_dict())
+
+    async def get_pending(self) -> list[dict[str, Any]]:
+        """Get all pending predictions."""
+        return await self.repository.get_pending_predictions()
+
+    async def update_resolution(
+        self,
+        market_id: str,
+        outcome_resolution: str,
+        actual_price: Decimal | None = None,
+        prediction_correct: bool | None = None,
+        brier_score: Decimal | None = None,
+    ) -> None:
+        """Update prediction with resolution data."""
+        await self.repository.update_resolution(
+            market_id, outcome_resolution, actual_price, prediction_correct, brier_score
+        )
+
+    async def get_calibration_stats(self) -> dict[str, Any]:
+        """Get calibration statistics."""
+        return await self.repository.get_calibration_stats()
