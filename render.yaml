@@ -1,9 +1,15 @@
+# Baysed $0 Architecture
+# - Render Free Web Service (API + Bot in one process)
+# - Neon PostgreSQL (free tier)
+# - Vercel (terminal frontend)
+# - UptimeRobot (free, 5-min health checks)
+
 services:
-  # API Server + Bot Worker
+  # Combined API Server + Trading Engine
   - type: web
-    name: bayse-bot-api
+    name: bayse-bot
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python -m api.run
     envVars:
@@ -12,11 +18,9 @@ services:
       - key: BOT_RUN_MODE
         value: observation
       - key: DATABASE_URL
-        fromDatabase:
-          name: bayse-db
-          property: connectionString
+        sync: false  # Set manually in Render dashboard (Neon connection string)
       - key: BAYSE_BASE_URL
-        sync: false
+        value: https://relay.bayse.markets
       - key: BAYSE_PUBLIC_KEY
         sync: false
       - key: BAYSE_SECRET_KEY
@@ -27,8 +31,11 @@ services:
         value: USD
     healthCheckPath: /health
 
-  # PostgreSQL Database
-  - type: postgresql
-    name: bayse-db
-    plan: starter
-    databaseName: bayse_bot
+# Note: DATABASE_URL should be set to your Neon connection string
+# Format: postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
+#
+# Neon Free Tier:
+# - 100 CU-hours/month
+# - 0.5 GB storage
+# - Scales to zero after inactivity
+# - https://neon.com
