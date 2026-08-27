@@ -199,8 +199,13 @@ class Bot:
                 y_price = _dec(raw_market.get("outcome1Price"), "0.5")
                 n_price = _dec(raw_market.get("outcome2Price"), "0.5")
                 now = datetime.now(timezone.utc)
-                yes = OrderBook(market.market_id, Outcome.YES, (), (BookLevel(y_price, Decimal("1")),), now)
-                no = OrderBook(market.market_id, Outcome.NO, (), (BookLevel(n_price, Decimal("1")),), now)
+                spread = Decimal("0.01")
+                yes = OrderBook(market.market_id, Outcome.YES,
+                    (BookLevel(y_price - spread, Decimal("1")),),
+                    (BookLevel(y_price + spread, Decimal("1")),), now)
+                no = OrderBook(market.market_id, Outcome.NO,
+                    (BookLevel(n_price - spread, Decimal("1")),),
+                    (BookLevel(n_price + spread, Decimal("1")),), now)
                 log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
 
             # Build contract state
