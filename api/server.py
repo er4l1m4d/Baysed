@@ -174,6 +174,17 @@ async def health():
 @app.get("/debug")
 async def debug():
     from .shared import bot_diagnostics
+    # Test Bayse API connectivity
+    bayse_ok = False
+    bayse_events = 0
+    try:
+        from bayse_bot.bayse import BayseClient
+        async with BayseClient("https://relay.bayse.markets") as client:
+            events = await client.events_by_series("crypto-btc-15min")
+            bayse_events = len(events)
+            bayse_ok = True
+    except Exception as e:
+        bayse_ok = False
     return {
         "btc_price": float(shared_state.btc_price) if shared_state.btc_price else None,
         "btc_connected": shared_state.last_tick_at is not None if hasattr(shared_state, 'last_tick_at') else False,
@@ -181,6 +192,8 @@ async def debug():
         "bot_error": bot_diagnostics["error"],
         "init_error": bot_diagnostics["init_error"],
         "cycles": bot_diagnostics["cycles"],
+        "bayse_api_ok": bayse_ok,
+        "bayse_events": bayse_events,
     }
 
 
