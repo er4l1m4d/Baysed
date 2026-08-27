@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from ..predictions import outcome_from_bayse_resolved, PredictionOutcome
-from ..repositories.interfaces import PredictionRepository
+from .predictions import outcome_from_bayse_resolved, PredictionOutcome
+from .repositories.interfaces import PredictionRepository
 
 log = logging.getLogger(__name__)
 
