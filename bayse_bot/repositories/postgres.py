@@ -28,6 +28,7 @@ class PostgresPredictionRepository(PredictionRepository):
         pred = Prediction(**prediction)
         self.session.add(pred)
         await self.session.flush()
+        await self.session.commit()
 
     async def get_prediction(self, market_id: str) -> dict[str, Any] | None:
         from api.models import Prediction
@@ -217,6 +218,7 @@ class PostgresTradeRepository(TradeRepository):
         record = TradeRecord(**trade)
         self.session.add(record)
         await self.session.flush()
+        await self.session.commit()
         return record.id
 
     async def get_trade(self, trade_id: int) -> dict[str, Any] | None:
@@ -338,6 +340,7 @@ class PostgresBotStatusRepository(BotStatusRepository):
                     setattr(db_status, key, value)
 
         await self.session.flush()
+        await self.session.commit()
 
     async def set_heartbeat(self) -> None:
         await self.update_status({"updated_at": datetime.now(timezone.utc)})
@@ -391,6 +394,7 @@ class PostgresRiskRepository(RiskRepository):
             """),
             {"state_json": state_json, "updated_at": datetime.now(timezone.utc)},
         )
+        await self.session.commit()
 
     async def add_uncertain_market(self, market_id: str) -> None:
         state = await self.load_risk_state()
@@ -470,6 +474,7 @@ class PostgresEventLogRepository(EventLogRepository):
                 "recorded_at": datetime.now(timezone.utc),
             },
         )
+        await self.session.commit()
 
     async def get_events(
         self, limit: int = 100, event_type: str | None = None
