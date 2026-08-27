@@ -246,60 +246,90 @@ async def get_predictions(
 
 @app.get("/calibration", response_model=CalibrationResponse)
 async def get_calibration(db: AsyncSession = Depends(get_db)):
-    # Total counts
-    total = (await db.execute(select(func.count(Prediction.id)))).scalar() or 0
-    resolved = (await db.execute(
-        select(func.count(Prediction.id)).where(Prediction.outcome_resolution != "pending")
-    )).scalar() or 0
-    correct = (await db.execute(
-        select(func.count(Prediction.id)).where(Prediction.prediction_correct == True)
-    )).scalar() or 0
+    try:
+        # Total counts
+        total = (await db.execute(select(func.count(Prediction.id)))).scalar() or 0
+        resolved = (await db.execute(
+            select(func.count(Prediction.id)).where(Prediction.outcome_resolution != "pending")
+        )).scalar() or 0
+        correct = (await db.execute(
+            select(func.count(Prediction.id)).where(Prediction.prediction_correct == True)
+        )).scalar() or 0
 
-    # Brier mean
-    brier_result = await db.execute(
-        select(func.avg(Prediction.brier_score)).where(Prediction.brier_score.isnot(None))
-    )
-    brier_mean = brier_result.scalar()
-
-    # Calibration curve
-    curve = []
-    for bucket_idx in range(10):
-        low = bucket_idx * 0.1
-        high = (bucket_idx + 1) * 0.1
-        bucket_result = await db.execute(
-            select(
-                func.count(Prediction.id),
-                func.avg(Prediction.probability),
-                func.sum(func.cast(Prediction.prediction_correct, Integer)),
-            ).where(
-                Prediction.probability >= low,
-                Prediction.probability < high,
-                Prediction.outcome_resolution != "pending",
-            )
+        # Brier mean
+        brier_result = await db.execute(
+            select(func.avg(Prediction.brier_score)).where(Prediction.brier_score.isnot(None))
         )
-        row = bucket_result.one()
-        count = row[0] or 0
-        if count > 0:
-            avg_prob = float(row[1]) if row[1] else 0
-            bucket_correct = row[2] or 0
-            actual_rate = bucket_correct / count
-            curve.append({
-                "bucket": f"{int(low*100)}-{int(high*100)}%",
-                "count": count,
-                "avg_predicted": round(avg_prob, 4),
-                "actual_rate": round(actual_rate, 4),
-                "gap": round(avg_prob - actual_rate, 4),
-            })
+        brier_mean = brier_result.scalar()
 
-    return CalibrationResponse(
-        total=total,
-        resolved=resolved,
-        pending=total - resolved,
-        correct=correct,
-        accuracy=correct / resolved if resolved > 0 else None,
-        brier_mean=float(brier_mean) if brier_mean else None,
-        calibration_curve=curve,
-    )
+        # Calibration curve
+        curve = []
+        for bucket_idx in range(10):
+            low = bucket_idx * 0.1
+            high = (bucket_idx + 1) * 0.1
+            bucket_result = await db.execute(
+                select(
+                    func.count(Prediction.id),
+                    func.avg(Prediction.probability),
+                    func.count(Prediction.id),
+                ).where(
+                    Prediction.probability >= low,
+                    Prediction.probability < high,
+                    Prediction.outcome_resolution != "pending",
+                    Prediction.prediction_correct == True,
+                )
+            )
+            correct_in_bucket = (await db.execute(
+                select(func.count(Prediction.id)).where(
+                    Prediction.probability >= low,
+                    Prediction.probability < high,
+                    Prediction.outcome_resolution != "pending",
+                    Prediction.prediction_correct == True,
+                )
+            )).scalar() or 0
+
+            total_in_bucket = (await db.execute(
+                select(func.count(Prediction.id)).where(
+                    Prediction.probability >= low,
+                    Prediction.probability < high,
+                    Prediction.outcome_resolution != "pending",
+                )
+            )).scalar() or 0
+
+            avg_prob_result = await db.execute(
+                select(func.avg(Prediction.probability)).where(
+                    Prediction.probability >= low,
+                    Prediction.probability < high,
+                    Prediction.outcome_resolution != "pending",
+                )
+            )
+            avg_prob = avg_prob_result.scalar()
+
+            if total_in_bucket > 0:
+                actual_rate = correct_in_bucket / total_in_bucket
+                curve.append({
+                    "bucket": f"{int(low*100)}-{int(high*100)}%",
+                    "count": total_in_bucket,
+                    "avg_predicted": round(float(avg_prob) if avg_prob else 0, 4),
+                    "actual_rate": round(actual_rate, 4),
+                    "gap": round((float(avg_prob) if avg_prob else 0) - actual_rate, 4),
+                })
+
+        return CalibrationResponse(
+            total=total,
+            resolved=resolved,
+            pending=total - resolved,
+            correct=correct,
+            accuracy=correct / resolved if resolved > 0 else None,
+            brier_mean=float(brier_mean) if brier_mean else None,
+            calibration_curve=curve,
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error("calibration error: %s", e)
+        return CalibrationResponse(
+            total=0, resolved=0, pending=0, correct=0,
+            accuracy=None, brier_mean=None, calibration_curve=[],
+        )
 
 
 @app.get("/trades", response_model=list[TradeResponse])
