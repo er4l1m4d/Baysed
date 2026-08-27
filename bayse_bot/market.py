@@ -92,5 +92,8 @@ def validate_market(m: Market, s: Settings, now: datetime | None = None) -> list
     if m.resolution_source and m.resolution_rules:
         combined = (m.resolution_rules + " " + m.resolution_source).lower()
         if not all(term in combined for term in s.resolution_terms): reasons.append("resolution_safety_rule_mismatch")
-    if not m.closes_at or (m.closes_at - now).total_seconds() < s.no_entry_expiry: reasons.append("too_close_to_expiry")
+    # Only reject near-expiry in paper/live modes — observation still wants data
+    from .models import RunMode
+    if s.mode is not RunMode.OBSERVATION:
+        if not m.closes_at or (m.closes_at - now).total_seconds() < s.no_entry_expiry: reasons.append("too_close_to_expiry")
     return reasons
