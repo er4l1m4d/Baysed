@@ -13,7 +13,7 @@ from .config import Settings
 from .contract import ContractState, build_contract_state
 from .feed import MarketState
 from .market import adapt_market, validate_market
-from .models import BTCFeatures, Market, Outcome, RunMode, EventType
+from .models import BTCFeatures, BookLevel, Market, OrderBook, Outcome, RunMode, EventType
 from .predictions import PredictionRecord, PredictionRecorder
 from .repositories import RepositorySet
 from .resolution import ResolutionTracker
@@ -21,6 +21,14 @@ from .risk import RiskManager
 from .strategy import StrategyInput, strategy_by_name
 
 log = logging.getLogger(__name__)
+
+
+def _dec(v, default="0"):
+    from decimal import Decimal, InvalidOperation
+    try:
+        return Decimal(str(v)) if v is not None else Decimal(default)
+    except (InvalidOperation, ValueError):
+        return Decimal(default)
 
 # Map Bayse outcome labels to our internal Outcome enum
 _LABEL_TO_OUTCOME = {"up": Outcome.YES, "down": Outcome.NO, "yes": Outcome.YES, "no": Outcome.NO}
@@ -180,17 +188,20 @@ class Bot:
                 return
 
             books_raw = await self.client.book([o1_id, o2_id])
-            if not isinstance(books_raw, list) or len(books_raw) < 2:
-                await self.repos.event_log.log_event(
-                    EventType.CANDIDATE_REJECTED,
-                    market_id=market.market_id,
-                    reasons=["incomplete_book_response"],
-                )
-                return
 
-            # Parse: first book = Up/Yes, second = Down/No
-            yes = parse_book(books_raw[0], market.market_id, Outcome.YES)
-            no = parse_book(books_raw[1], market.market_id, Outcome.NO)
+            # Parse books if available; otherwise construct minimal stubs from market metadata
+            if isinstance(books_raw, list) and len(books_raw) >= 2:
+                yes = parse_book(books_raw[0], market.market_id, Outcome.YES)
+                no = parse_book(books_raw[1], market.market_id, Outcome.NO)
+            else:
+                # Fallback: use market last-trade prices from event payload
+                raw_market = market.raw.get("market", {}) if market.raw else {}
+                y_price = _dec(raw_market.get("outcome1Price"), "0.5")
+                n_price = _dec(raw_market.get("outcome2Price"), "0.5")
+                now = datetime.now(timezone.utc)
+                yes = OrderBook(market.market_id, Outcome.YES, (), (BookLevel(y_price, Decimal("1")),), now)
+                no = OrderBook(market.market_id, Outcome.NO, (), (BookLevel(n_price, Decimal("1")),), now)
+                log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
 
             # Build contract state
             spread = yes.spread
