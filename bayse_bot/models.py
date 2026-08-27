@@ -32,6 +32,19 @@ class OrderStatus(StrEnum):
 TERMINAL_ORDER_STATUSES = {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED}
 
 
+class EventType(StrEnum):
+    """Typed event names for operational logging."""
+    CANDIDATE_REJECTED = "candidate_rejected"
+    BOOK_ISSUES = "book_issues"
+    MARKET_EVALUATED = "market_evaluated"
+    MARKET_EVALUATION_FAILURE = "market_evaluation_failure"
+    SCAN_FAILURE = "scan_failure"
+    TRADE_ATTEMPT_FAILED = "trade_attempt_failed"
+    LIVE_ORDER_AMBIGUOUS = "live_order_ambiguous"
+    RESOLUTION_PROCESSED = "resolution_processed"
+    PREDICTION_RECORDED = "prediction_recorded"
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 

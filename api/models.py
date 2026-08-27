@@ -14,11 +14,16 @@ class Base(DeclarativeBase):
 
 
 class Prediction(Base):
-    """Prediction record from the bot."""
+    """Prediction record from the bot.
+
+    Each row is one snapshot of a market evaluation. Multiple snapshots
+    per market_id are allowed — this captures how the model's output
+    changes as BTC price and time evolve.
+    """
     __tablename__ = "predictions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    market_id = Column(String(255), unique=True, nullable=False, index=True)
+    market_id = Column(String(255), nullable=False, index=True)  # NOT unique — multiple snapshots per market
     event_id = Column(String(255), nullable=False, index=True)
     title = Column(String(500), nullable=False)
 
@@ -49,17 +54,32 @@ class Prediction(Base):
     # Metadata
     strategy_version = Column(String(20), default="2")
     experiment_tag = Column(String(100), default="distance_to_strike_v1")
+
+    # Timestamps (multi-granularity)
+    observed_at = Column(DateTime(timezone=True))       # when market was first seen in scan
+    decided_at = Column(DateTime(timezone=True))        # when model produced its output
     recorded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    # Contract timing (from ContractState)
+    opened_at = Column(DateTime(timezone=True))
+    closes_at = Column(DateTime(timezone=True))
+    volume_ratio = Column(Numeric(10, 6))
+
+    # Outcome IDs (for resolution mapping)
+    outcome1_id = Column(String(255))
+    outcome2_id = Column(String(255))
 
     # Resolution
     outcome_resolution = Column(String(20), default="pending")
     actual_price = Column(Numeric(20, 8))
     resolved_at = Column(DateTime(timezone=True))
+    resolved_outcome_id = Column(String(255))  # raw Bayse value for audit trail
     prediction_correct = Column(Boolean)
     brier_score = Column(Numeric(10, 6))
 
     # Indexes
     __table_args__ = (
+        Index("ix_predictions_market_time", "market_id", "recorded_at"),
         Index("ix_predictions_resolution", "outcome_resolution"),
         Index("ix_predictions_recorded", "recorded_at"),
     )

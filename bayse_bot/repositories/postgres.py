@@ -57,6 +57,7 @@ class PostgresPredictionRepository(PredictionRepository):
         actual_price: Decimal | None = None,
         prediction_correct: bool | None = None,
         brier_score: Decimal | None = None,
+        resolved_outcome_id: str | None = None,
     ) -> None:
         from api.models import Prediction
         values: dict[str, Any] = {
@@ -69,6 +70,8 @@ class PostgresPredictionRepository(PredictionRepository):
             values["prediction_correct"] = prediction_correct
         if brier_score is not None:
             values["brier_score"] = brier_score
+        if resolved_outcome_id is not None:
+            values["resolved_outcome_id"] = resolved_outcome_id
 
         await self.session.execute(
             update(Prediction)
@@ -180,10 +183,24 @@ class PostgresPredictionRepository(PredictionRepository):
             "signal_strength": float(pred.signal_strength),
             "approved": pred.approved,
             "reasons": pred.reasons,
+            "strategy_version": pred.strategy_version,
+            "experiment_tag": pred.experiment_tag,
+            # Timestamps
+            "observed_at": pred.observed_at.isoformat() if pred.observed_at else None,
+            "decided_at": pred.decided_at.isoformat() if pred.decided_at else None,
             "recorded_at": pred.recorded_at.isoformat() if pred.recorded_at else "",
+            # Contract timing
+            "opened_at": pred.opened_at.isoformat() if pred.opened_at else None,
+            "closes_at": pred.closes_at.isoformat() if pred.closes_at else None,
+            "volume_ratio": float(pred.volume_ratio) if pred.volume_ratio else None,
+            # Outcome IDs
+            "outcome1_id": pred.outcome1_id,
+            "outcome2_id": pred.outcome2_id,
+            # Resolution
             "outcome_resolution": pred.outcome_resolution or "pending",
             "actual_price": float(pred.actual_price) if pred.actual_price else None,
             "resolved_at": pred.resolved_at.isoformat() if pred.resolved_at else None,
+            "resolved_outcome_id": pred.resolved_outcome_id,
             "prediction_correct": pred.prediction_correct,
             "brier_score": float(pred.brier_score) if pred.brier_score else None,
         }

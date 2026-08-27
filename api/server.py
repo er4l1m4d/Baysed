@@ -85,10 +85,22 @@ class PredictionResponse(BaseModel):
     signal_strength: float
     approved: bool
     reasons: list[str] | None
+    # Timestamps
+    observed_at: str | None = None
+    decided_at: str | None = None
     recorded_at: str
+    # Contract timing
+    opened_at: str | None = None
+    closes_at: str | None = None
+    volume_ratio: float | None = None
+    # Outcome IDs
+    outcome1_id: str | None = None
+    outcome2_id: str | None = None
+    # Resolution
     outcome_resolution: str
     actual_price: float | None
     resolved_at: str | None
+    resolved_outcome_id: str | None = None
     prediction_correct: bool | None
     brier_score: float | None
 

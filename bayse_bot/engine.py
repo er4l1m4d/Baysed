@@ -13,7 +13,7 @@ from .config import Settings
 from .contract import ContractState, build_contract_state
 from .feed import MarketState
 from .market import adapt_market, validate_market
-from .models import BTCFeatures, Market, Outcome, RunMode
+from .models import BTCFeatures, Market, Outcome, RunMode, EventType
 from .predictions import PredictionRecord, PredictionRecorder
 from .repositories import RepositorySet
 from .resolution import ResolutionTracker
@@ -92,7 +92,7 @@ class Bot:
                 reasons = validate_market(market, self.s)
                 if reasons:
                     await self.repos.event_log.log_event(
-                        "candidate_rejected",
+                        EventType.CANDIDATE_REJECTED,
                         market_id=market.market_id,
                         title=market.title,
                         reasons=reasons,
@@ -125,7 +125,7 @@ class Bot:
             except Exception as exc:
                 log.warning("scan_failure: %s: %s", type(exc).__name__, exc)
                 await self.repos.event_log.log_event(
-                    "scan_failure",
+                    EventType.SCAN_FAILURE,
                     error=type(exc).__name__,
                     detail=str(exc),
                 )
@@ -163,7 +163,7 @@ class Bot:
             o2_id = market.outcome2_id
             if not o1_id or not o2_id:
                 await self.repos.event_log.log_event(
-                    "candidate_rejected",
+                    EventType.CANDIDATE_REJECTED,
                     market_id=market.market_id,
                     reasons=["missing_outcome_ids"],
                 )
@@ -172,7 +172,7 @@ class Bot:
             books_raw = await self.client.book([o1_id, o2_id])
             if not isinstance(books_raw, list) or len(books_raw) < 2:
                 await self.repos.event_log.log_event(
-                    "candidate_rejected",
+                    EventType.CANDIDATE_REJECTED,
                     market_id=market.market_id,
                     reasons=["incomplete_book_response"],
                 )
@@ -207,7 +207,7 @@ class Bot:
 
             if reasons:
                 await self.repos.event_log.log_event(
-                    "book_issues",
+                    EventType.BOOK_ISSUES,
                     market_id=market.market_id,
                     reasons=reasons,
                 )
@@ -224,6 +224,7 @@ class Bot:
 
             # Record every prediction (regardless of approval)
             if contract:
+                now = datetime.now(timezone.utc)
                 pred = PredictionRecord(
                     market_id=market.market_id,
                     event_id=market.event_id,
@@ -246,6 +247,16 @@ class Bot:
                     signal_strength=decision.strength,
                     approved=decision.approved,
                     reasons=tuple(reasons),
+                    # Timestamps
+                    observed_at=now,
+                    decided_at=now,
+                    # Contract timing
+                    opened_at=contract.opened_at if hasattr(contract, 'opened_at') else None,
+                    closes_at=contract.closes_at if hasattr(contract, 'closes_at') else None,
+                    volume_ratio=contract.volume_ratio if hasattr(contract, 'volume_ratio') else Decimal("0"),
+                    # Outcome IDs (for resolution mapping)
+                    outcome1_id=market.outcome1_id or "",
+                    outcome2_id=market.outcome2_id or "",
                 )
                 await self.pred_rec.record(pred)
 
@@ -255,7 +266,7 @@ class Bot:
 
             # Log decision
             await self.repos.event_log.log_event(
-                "market_evaluated",
+                EventType.MARKET_EVALUATED,
                 market_id=market.market_id,
                 strategy=decision.strategy,
                 probability=str(decision.probability) if decision.probability else None,
@@ -278,7 +289,7 @@ class Bot:
         except Exception as exc:
             log.warning("market_evaluation_failure: %s: %s", market.market_id, exc)
             await self.repos.event_log.log_event(
-                "market_evaluation_failure",
+                EventType.MARKET_EVALUATION_FAILURE,
                 market_id=market.market_id,
                 error=type(exc).__name__,
                 detail=str(exc),
@@ -317,7 +328,7 @@ class Bot:
 
         if reasons:
             await self.repos.event_log.log_event(
-                "trade_attempt_failed",
+                EventType.TRADE_ATTEMPT_FAILED,
                 market_id=market.market_id,
                 reasons=reasons,
             )
@@ -359,7 +370,7 @@ class Bot:
             except Exception as exc:
                 await self.risk.uncertain(market.market_id)
                 await self.repos.event_log.log_event(
-                    "live_order_ambiguous",
+                    EventType.LIVE_ORDER_AMBIGUOUS,
                     market_id=market.market_id,
                     error=str(exc),
                 )

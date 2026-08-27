@@ -3,11 +3,12 @@
 When a 15-minute contract expires, the Bayse API marks it as "resolved" with
 a `resolvedOutcomeId` on each market. This module:
 1. Queries resolved events from Bayse
-2. Matches them against pending predictions
+2. Matches them against pending predictions using resolvedOutcomeId (canonical)
 3. Updates prediction records with the actual outcome
 4. Logs Brier score and calibration metrics
 
-Now uses repository pattern for persistence.
+Uses resolvedOutcomeId as the primary resolution source, with BTC close price
+as an independent verification field.
 """
 from __future__ import annotations
 import logging
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from ..predictions import outcome_from_bayse_resolved, PredictionOutcome
 from ..repositories.interfaces import PredictionRepository
 
 log = logging.getLogger(__name__)
@@ -27,7 +29,11 @@ class ResolutionTracker:
         self.repository = repository
 
     async def resolve_from_events(self, resolved_events: list[dict[str, Any]]) -> int:
-        """Match resolved events against pending predictions. Returns count of newly resolved predictions."""
+        """Match resolved events against pending predictions.
+
+        Returns count of newly resolved predictions.
+        Uses resolvedOutcomeId as canonical resolution source.
+        """
         if not resolved_events:
             return 0
 
@@ -61,41 +67,42 @@ class ResolutionTracker:
                 continue
 
             resolution = market_resolution[market_id]
+            resolved_outcome_id = resolution["resolved_outcome_id"]
 
-            # Determine which outcome won
-            strike = Decimal(str(record.get("strike_price", 0)))
-            close_value = resolution.get("event_close_value") or resolution.get("market_close_value")
+            # Get outcome IDs from the prediction record
+            outcome1_id = record.get("outcome1_id", "")
+            outcome2_id = record.get("outcome2_id", "")
 
-            if close_value and strike > 0:
-                close_decimal = Decimal(str(close_value))
-                # BTC above strike at close -> YES/UP won
-                actual_won = "YES" if close_decimal >= strike else "NO"
-            else:
-                # Can't determine resolution without close value
-                continue
-
-            # Update record
-            predicted = record.get("predicted_outcome", "")
-            was_correct = predicted == actual_won
+            # Use resolvedOutcomeId as canonical resolution (not price heuristic)
+            actual_won = outcome_from_bayse_resolved(resolved_outcome_id, outcome1_id, outcome2_id)
 
             # Calculate Brier score
             probability = Decimal(str(record.get("probability", 0.5)))
-            if actual_won == "YES":
+            if actual_won == PredictionOutcome.YES_WON.value:
                 brier_score = (probability - Decimal("1")) ** 2
             else:
                 brier_score = (probability - Decimal("0")) ** 2
 
+            # Determine correctness
+            predicted = record.get("predicted_outcome", "")
+            was_correct = predicted == actual_won
+
+            # Get BTC close price for audit trail (independent of resolution)
+            close_value = resolution.get("event_close_value") or resolution.get("market_close_value")
+            actual_price = Decimal(str(close_value)) if close_value else None
+
             # Update in database
             await self.repository.update_resolution(
                 market_id=market_id,
-                outcome_resolution=f"{actual_won.lower()}_won",
-                actual_price=Decimal(str(close_value)) if close_value else None,
+                outcome_resolution=actual_won,
+                actual_price=actual_price,
                 prediction_correct=was_correct,
                 brier_score=brier_score,
+                resolved_outcome_id=resolved_outcome_id,
             )
 
             resolved_count += 1
-            log.info("resolved: %s | predicted=%s actual=%s correct=%s brier=%.4f",
+            log.info("resolved: %s | predicted=%s actual=%s correct=%s brier=%.4f source=resolvedOutcomeId",
                 record.get("title", "")[:30], predicted, actual_won, was_correct, brier_score)
 
         return resolved_count

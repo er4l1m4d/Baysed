@@ -25,9 +25,31 @@ class PredictionOutcome(StrEnum):
     EXPIRED = "expired"
 
 
+def outcome_from_bayse_resolved(
+    resolved_outcome_id: str,
+    outcome1_id: str | None,
+    outcome2_id: str | None,
+) -> str:
+    """Map Bayse's resolvedOutcomeId to our PredictionOutcome string.
+
+    This is the canonical resolution method — uses Bayse's own
+    resolution rather than a price-based heuristic.
+    """
+    if resolved_outcome_id == outcome1_id:
+        return PredictionOutcome.YES_WON.value
+    elif resolved_outcome_id == outcome2_id:
+        return PredictionOutcome.NO_WON.value
+    return PredictionOutcome.EXPIRED.value
+
+
 @dataclass
 class PredictionRecord:
-    """One prediction for one market evaluation."""
+    """One prediction snapshot for one market evaluation.
+
+    Each time the bot evaluates a market, a new PredictionRecord is created.
+    Multiple snapshots per market are allowed — this captures how the model's
+    output changes as BTC price and time evolve.
+    """
 
     # Identity
     market_id: str
@@ -61,15 +83,35 @@ class PredictionRecord:
     # Metadata
     strategy_version: str = "2"
     experiment_tag: str = "distance_to_strike_v1"
-    recorded_at: datetime = None
+
+    # Timestamps (multi-granularity)
+    observed_at: datetime = None      # when market was first seen in scan
+    decided_at: datetime = None       # when model produced its output
+    recorded_at: datetime = None      # when persisted to DB
+
+    # Contract timing (from ContractState)
+    opened_at: datetime | None = None
+    closes_at: datetime | None = None
+    volume_ratio: Decimal = Decimal("0")
+
+    # Outcome IDs (for resolution mapping)
+    outcome1_id: str = ""
+    outcome2_id: str = ""
 
     # Resolution (populated later)
-    outcome_resolution: str = "pending"  # "pending" | "yes_won" | "no_won"
+    outcome_resolution: str = PredictionOutcome.PENDING.value
     actual_price: Decimal | None = None  # BTC price at resolution
+    resolved_at: datetime | None = None
+    resolved_outcome_id: str | None = None  # raw Bayse value for audit trail
 
     def __post_init__(self):
+        now = datetime.now(timezone.utc)
         if self.recorded_at is None:
-            self.recorded_at = datetime.now(timezone.utc)
+            self.recorded_at = now
+        if self.observed_at is None:
+            self.observed_at = now
+        if self.decided_at is None:
+            self.decided_at = now
 
     def to_db_dict(self) -> dict[str, Any]:
         """Convert to dictionary suitable for database insertion."""
@@ -106,10 +148,12 @@ class PredictionRecorder:
         actual_price: Decimal | None = None,
         prediction_correct: bool | None = None,
         brier_score: Decimal | None = None,
+        resolved_outcome_id: str | None = None,
     ) -> None:
         """Update prediction with resolution data."""
         await self.repository.update_resolution(
-            market_id, outcome_resolution, actual_price, prediction_correct, brier_score
+            market_id, outcome_resolution, actual_price,
+            prediction_correct, brier_score, resolved_outcome_id,
         )
 
     async def get_calibration_stats(self) -> dict[str, Any]:
