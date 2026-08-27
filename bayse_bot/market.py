@@ -77,7 +77,7 @@ def validate_market(m: Market, s: Settings, now: datetime | None = None) -> list
     text = f"{m.title} {m.question}".lower()
     if not m.event_id or not m.market_id: reasons.append("missing_market_identity")
     if m.status not in {"active", "open"}: reasons.append("market_not_open")
-    if m.engine != "CLOB": reasons.append(f"unsupported_engine:{m.engine or 'missing'}")
+    if m.engine and m.engine != "CLOB": reasons.append(f"unsupported_engine:{m.engine}")
     # Currency check: only if currency is present (current API often omits it)
     if m.currency and m.currency != s.currency: reasons.append(f"currency_mismatch:{m.currency}")
     # Accept both Yes/No and Up/Down binary outcomes
