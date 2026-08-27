@@ -103,7 +103,11 @@ class Bot:
 
     async def run(self, stop: asyncio.Event, interval_seconds: int = 15) -> None:
         """Worker loop. Individual scan failures are logged, never converted into trades."""
-        await self.initialize()
+        try:
+            await self.initialize()
+        except Exception as exc:
+            log.error("initialize failed: %s: %s", type(exc).__name__, exc)
+            return
 
         while not stop.is_set():
             try:
@@ -124,11 +128,14 @@ class Bot:
 
             except Exception as exc:
                 log.warning("scan_failure: %s: %s", type(exc).__name__, exc)
-                await self.repos.event_log.log_event(
-                    EventType.SCAN_FAILURE,
-                    error=type(exc).__name__,
-                    detail=str(exc),
-                )
+                try:
+                    await self.repos.event_log.log_event(
+                        EventType.SCAN_FAILURE,
+                        error=type(exc).__name__,
+                        detail=str(exc),
+                    )
+                except Exception:
+                    pass
 
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
