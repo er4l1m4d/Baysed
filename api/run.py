@@ -10,6 +10,24 @@ from api.shared import shared_state
 log = logging.getLogger(__name__)
 
 
+async def broadcast_loop():
+    """Periodically broadcast BTC price to all connected WebSocket clients."""
+    from api.server import broadcast_btc_price
+
+    last_price = None
+    while True:
+        try:
+            price = float(shared_state.btc_price) if shared_state.btc_price else None
+            if price and price != last_price:
+                momentum = float(shared_state.btc_features.momentum_pct) if shared_state.btc_features else 0
+                volatility = float(shared_state.btc_features.atr_pct) if shared_state.btc_features else 0
+                await broadcast_btc_price(price, momentum, volatility)
+                last_price = price
+        except Exception as e:
+            log.debug("broadcast error: %s", e)
+        await asyncio.sleep(1)
+
+
 async def start_bot_engine():
     """Start the trading engine as a background task."""
     try:
@@ -68,6 +86,9 @@ async def start():
 
     # Start bot engine in background
     bot_task = asyncio.create_task(start_bot_engine())
+
+    # Start broadcaster in background
+    bcast_task = asyncio.create_task(broadcast_loop())
 
     # Start uvicorn server
     config = uvicorn.Config(
