@@ -5,6 +5,7 @@ Creates the right repository implementation based on configuration.
 from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+import ssl
 
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
@@ -51,21 +52,21 @@ async def create_repositories(database_url: str) -> RepositorySet:
     if url.startswith("sqlite://") and "+aiosqlite" not in url:
         url = url.replace("sqlite://", "sqlite+aiosqlite://", 1)
 
-    # Parse URL to handle sslmode parameter
+    # Parse URL to check for SSL and strip incompatible params
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
-    sslmode = params.pop("sslmode", [None])[0]
+    needs_ssl = params.get("sslmode", [None])[0] == "require"
     
-    # Rebuild URL without sslmode
-    clean_query = urlencode(params, doseq=True)
-    clean_url = urlunparse(parsed._replace(query=clean_query))
+    # Remove ALL query params - asyncpg doesn't understand most of them
+    clean_url = urlunparse(parsed._replace(query=""))
 
     # Configure SSL for asyncpg if needed
     connect_args = {}
-    if sslmode == "require":
-        import ssl
-        connect_args["ssl"] = ssl.create_default_context()
-        connect_args["ssl"].verify_mode = ssl.CERT_REQUIRED
+    if needs_ssl:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        connect_args["ssl"] = ctx
 
     engine = create_async_engine(
         clean_url, 
