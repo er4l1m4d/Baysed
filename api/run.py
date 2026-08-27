@@ -30,6 +30,7 @@ async def broadcast_loop():
 
 async def start_bot_engine():
     """Start the trading engine as a background task."""
+    log.info("bot engine task starting...")
     try:
         from bayse_bot.config import Settings
         from bayse_bot.engine import Bot
@@ -43,11 +44,13 @@ async def start_bot_engine():
 
         database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./bayse_bot.db")
         repos = await create_repositories(database_url)
+        log.info("repositories created")
 
         # Use shared state so API can read BTC price
         state = shared_state
         feed = BayseFeed(state, momentum_window_seconds=s.momentum_window_seconds)
         market_feed = BayseMarketFeed()
+        log.info("feeds created, starting BTC feed...")
 
         stop = asyncio.Event()
 
@@ -61,12 +64,15 @@ async def start_bot_engine():
                 break
             await asyncio.sleep(0.1)
 
-        if not feed.last_price:
+        if feed.last_price:
+            log.info("BTC feed connected, price=$%s", feed.last_price)
+        else:
             log.warning("no BTC price data after waiting, bot engine starting anyway")
 
         # Bot engine needs API keys for REST calls
         if s.public_key and s.secret_key:
             s.validate_live()
+            log.info("starting full bot engine with API keys")
             async with BayseClient(s.bayse_base_url, s.public_key, s.secret_key) as client:
                 await Bot(s, client, state, repos, market_feed).run(stop)
         else:
