@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import init_db, get_db, async_session
 from .models import Prediction, BotStatus, TradeRecord
+from .shared import shared_state
 
 log = logging.getLogger(__name__)
 
@@ -163,11 +164,16 @@ async def get_status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotStatus).where(BotStatus.id == 1))
     status = result.scalar_one_or_none()
 
+    # Get live BTC price from shared state (in-memory, updated by feed)
+    live_price = float(shared_state.btc_price) if shared_state.btc_price else None
+    live_momentum = float(shared_state.btc_features.momentum_pct) if shared_state.btc_features.momentum_pct else None
+    live_volatility = float(shared_state.btc_features.atr_pct) if shared_state.btc_features.atr_pct else None
+
     if not status:
         return StatusResponse(
             is_running=False, mode="observation", strategy="distance_to_strike",
-            last_cycle_at=None, last_btc_price=None, last_momentum_pct=None,
-            last_volatility=None, total_predictions=0, total_resolved=0,
+            last_cycle_at=None, last_btc_price=live_price, last_momentum_pct=live_momentum,
+            last_volatility=live_volatility, total_predictions=0, total_resolved=0,
             total_correct=0, accuracy=None, brier_mean=None, uptime_seconds=0,
             error_count=0, last_error=None,
         )
@@ -181,9 +187,9 @@ async def get_status(db: AsyncSession = Depends(get_db)):
         mode=status.mode,
         strategy=status.strategy,
         last_cycle_at=status.last_cycle_at.isoformat() if status.last_cycle_at else None,
-        last_btc_price=float(status.last_btc_price) if status.last_btc_price else None,
-        last_momentum_pct=float(status.last_momentum_pct) if status.last_momentum_pct else None,
-        last_volatility=float(status.last_volatility) if status.last_volatility else None,
+        last_btc_price=live_price or (float(status.last_btc_price) if status.last_btc_price else None),
+        last_momentum_pct=live_momentum or (float(status.last_momentum_pct) if status.last_momentum_pct else None),
+        last_volatility=live_volatility or (float(status.last_volatility) if status.last_volatility else None),
         total_predictions=status.total_predictions,
         total_resolved=status.total_resolved,
         total_correct=status.total_correct,
