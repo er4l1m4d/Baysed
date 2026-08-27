@@ -5,7 +5,7 @@ import os
 import uvicorn
 
 from api.init_db import init_db
-from api.shared import shared_state
+from api.shared import shared_state, bot_diagnostics
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ async def start_bot_engine():
         repos = await create_repositories(database_url)
         log.info("repositories created")
 
-        # Use shared state so API can read BTC price
         state = shared_state
         feed = BayseFeed(state, momentum_window_seconds=s.momentum_window_seconds)
         market_feed = BayseMarketFeed()
@@ -54,11 +53,9 @@ async def start_bot_engine():
 
         stop = asyncio.Event()
 
-        # Start feeds in background — these always work (no API keys needed)
         btc_task = asyncio.create_task(feed.run(stop))
         market_task = asyncio.create_task(market_feed.run(stop))
 
-        # Wait for initial BTC data
         for _ in range(50):
             if feed.last_price:
                 break
@@ -69,7 +66,8 @@ async def start_bot_engine():
         else:
             log.warning("no BTC price data after waiting, bot engine starting anyway")
 
-        # Bot engine needs API keys for REST calls
+        bot_diagnostics["started"] = True
+
         if s.public_key and s.secret_key:
             s.validate_live()
             log.info("starting full bot engine with API keys")
@@ -77,11 +75,11 @@ async def start_bot_engine():
                 await Bot(s, client, state, repos, market_feed).run(stop)
         else:
             log.warning("no BAYSE API keys — running BTC feed only (no market scanning)")
-            # Keep the feeds running indefinitely
             while not stop.is_set():
                 await asyncio.sleep(1)
 
     except Exception as e:
+        bot_diagnostics["error"] = str(e)
         log.error("bot engine error: %s", e, exc_info=True)
 
 
@@ -90,13 +88,9 @@ async def start():
     await init_db()
     log.info("database ready, starting server + bot engine...")
 
-    # Start bot engine in background
     bot_task = asyncio.create_task(start_bot_engine())
-
-    # Start broadcaster in background
     bcast_task = asyncio.create_task(broadcast_loop())
 
-    # Start uvicorn server
     config = uvicorn.Config(
         "api.server:app",
         host="0.0.0.0",

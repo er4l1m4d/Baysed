@@ -171,6 +171,17 @@ async def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/debug")
+async def debug():
+    from .shared import bot_diagnostics
+    return {
+        "btc_price": float(shared_state.btc_price) if shared_state.btc_price else None,
+        "btc_connected": shared_state.last_tick_at is not None if hasattr(shared_state, 'last_tick_at') else False,
+        "bot_started": bot_diagnostics["started"],
+        "bot_error": bot_diagnostics["error"],
+    }
+
+
 @app.get("/status", response_model=StatusResponse)
 async def get_status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotStatus).where(BotStatus.id == 1))

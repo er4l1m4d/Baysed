@@ -6,3 +6,6 @@ from bayse_bot.feed import MarketState
 
 # Global shared state — both API and bot engine use this
 shared_state = MarketState()
+
+# Bot engine diagnostics (mutable dict so run.py can write to it)
+bot_diagnostics: dict = {"error": None, "started": False}
