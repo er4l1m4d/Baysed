@@ -217,7 +217,7 @@ class Bot:
                     contract.distance_from_strike_pct, contract.is_above_strike,
                     contract.seconds_remaining, contract.seconds_elapsed + contract.seconds_remaining)
 
-            # Check book quality
+            # Check book quality (skip liquidity check in observation mode — we just want training data)
             reasons = []
             for b in (yes, no):
                 if not b.best_ask or not b.best_bid:
@@ -228,7 +228,7 @@ class Bot:
                     reasons.append("spread_too_wide")
                 elif b.relative_spread and b.relative_spread > self.s.max_relative_spread:
                     reasons.append("relative_spread_too_wide")
-                elif b.depth_at_or_better("BUY", b.best_ask) < self.s.min_liquidity:
+                elif self.s.mode is not RunMode.OBSERVATION and b.depth_at_or_better("BUY", b.best_ask) < self.s.min_liquidity:
                     reasons.append("insufficient_entry_depth")
 
             if reasons:
