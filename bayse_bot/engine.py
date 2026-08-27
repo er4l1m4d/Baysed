@@ -124,7 +124,10 @@ class Bot:
                     "last_volatility": btc.atr_pct,
                 })
 
-                await self.scan_once()
+                try:
+                    await asyncio.wait_for(self.scan_once(), timeout=30)
+                except asyncio.TimeoutError:
+                    log.warning("scan_once timed out after 30s")
 
             except Exception as exc:
                 log.warning("scan_failure: %s: %s", type(exc).__name__, exc)
