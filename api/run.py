@@ -68,17 +68,24 @@ async def start_bot_engine():
 
         bot_diagnostics["started"] = True
 
-        # Start full bot engine — read-only endpoints work without API keys.
-        # Only order placement requires keys (handled by mode check inside Bot).
-        if s.public_key and s.secret_key:
-            s.validate_live()
-            log.info("starting full bot engine with API keys")
-            async with BayseClient(s.bayse_base_url, s.public_key, s.secret_key) as client:
-                await Bot(s, client, state, repos, market_feed).run(stop)
-        else:
-            log.info("no API keys — starting observation-only engine (markets + predictions, no trades)")
-            async with BayseClient(s.bayse_base_url) as client:
-                await Bot(s, client, state, repos, market_feed).run(stop)
+        # Create client (read-only endpoints work without API keys)
+        client = BayseClient(s.bayse_base_url, s.public_key or "", s.secret_key or "")
+        await client.__aenter__()
+
+        bot = Bot(s, client, state, repos, market_feed)
+
+        try:
+            await bot.initialize()
+        except Exception as e:
+            bot_diagnostics["init_error"] = str(e)
+            log.error("bot initialize failed: %s", e, exc_info=True)
+            # Keep feeds running anyway
+            while not stop.is_set():
+                await asyncio.sleep(1)
+            return
+
+        log.info("bot initialized, starting scan loop")
+        await bot.run(stop)
 
     except Exception as e:
         bot_diagnostics["error"] = str(e)

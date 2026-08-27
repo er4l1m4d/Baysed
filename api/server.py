@@ -179,6 +179,8 @@ async def debug():
         "btc_connected": shared_state.last_tick_at is not None if hasattr(shared_state, 'last_tick_at') else False,
         "bot_started": bot_diagnostics["started"],
         "bot_error": bot_diagnostics["error"],
+        "init_error": bot_diagnostics["init_error"],
+        "cycles": bot_diagnostics["cycles"],
     }
 
 
