@@ -4,6 +4,7 @@ Creates the right repository implementation based on configuration.
 """
 from __future__ import annotations
 from typing import Any
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
@@ -38,6 +39,7 @@ async def create_repositories(database_url: str) -> RepositorySet:
     - PostgreSQL (asyncpg) — for production (Neon, Render, etc.)
     - SQLite (aiosqlite) — for local development
     """
+    from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
     # Normalize URL
@@ -49,7 +51,28 @@ async def create_repositories(database_url: str) -> RepositorySet:
     if url.startswith("sqlite://") and "+aiosqlite" not in url:
         url = url.replace("sqlite://", "sqlite+aiosqlite://", 1)
 
-    engine = create_async_engine(url, echo=False, pool_pre_ping=True)
+    # Parse URL to handle sslmode parameter
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    sslmode = params.pop("sslmode", [None])[0]
+    
+    # Rebuild URL without sslmode
+    clean_query = urlencode(params, doseq=True)
+    clean_url = urlunparse(parsed._replace(query=clean_query))
+
+    # Configure SSL for asyncpg if needed
+    connect_args = {}
+    if sslmode == "require":
+        import ssl
+        connect_args["ssl"] = ssl.create_default_context()
+        connect_args["ssl"].verify_mode = ssl.CERT_REQUIRED
+
+    engine = create_async_engine(
+        clean_url, 
+        echo=False, 
+        pool_pre_ping=True,
+        connect_args=connect_args if connect_args else None
+    )
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     # Import models to ensure tables exist
@@ -101,7 +124,3 @@ async def create_repositories(database_url: str) -> RepositorySet:
         market=PostgresMarketRepository(get_session()),
         event_log=PostgresEventLogRepository(get_session()),
     )
-
-
-# Need text for raw SQL
-from sqlalchemy import text
