@@ -94,6 +94,7 @@ class Bot:
             events = await self.client.events()
             log.info("scan: full scan -> %d open events", len(events))
 
+        last_market = None
         for event in events:
             for raw_market in event.get("markets", []):
                 market = adapt_market(event, raw_market)
@@ -108,14 +109,59 @@ class Bot:
                     continue
                 log.info("scan: evaluating %s (strike=%s)", market.title[:40], market.strike_price)
                 await self.evaluate_market(market)
+                last_market = market
+
+        # Store timing from the last evaluated market for adaptive interval
+        if last_market:
+            self._last_market_opens_at = last_market.opens_at
+            self._last_market_closes_at = last_market.closes_at
+
+    def _adaptive_interval(self) -> int:
+        """Determine scan interval based on market lifecycle position.
+
+        Market window: 15 minutes (900 seconds)
+        Phase 1 (0-180s from open):  15s — market forming, capture initial move
+        Phase 2 (180-720s):          60s — stable, save API calls
+        Phase 3 (720-900s):          15s — resolution window, capture final state
+        Default: 30s when no market timing available.
+        """
+        if not getattr(self, "_last_market_opens_at", None) or not getattr(self, "_last_market_closes_at", None):
+            return 30
+
+        now = datetime.now(timezone.utc)
+        opens_at = self._last_market_opens_at
+        closes_at = self._last_market_closes_at
+
+        seconds_elapsed = (now - opens_at).total_seconds()
+        seconds_remaining = (closes_at - now).total_seconds()
+
+        # Market has closed or hasn't opened yet
+        if seconds_remaining <= 0 or seconds_elapsed < 0:
+            return 30
+
+        if seconds_elapsed <= 180:
+            return 15   # Phase 1: market forming
+        elif seconds_elapsed <= 720:
+            return 60   # Phase 2: stable
+        else:
+            return 15   # Phase 3: resolution window
 
     async def run(self, stop: asyncio.Event, interval_seconds: int = 15) -> None:
-        """Worker loop. Individual scan failures are logged, never converted into trades."""
+        """Worker loop. Uses adaptive scan interval based on market lifecycle.
+
+        Phase 1 (0-180s from open):  15s — market forming
+        Phase 2 (180-720s):          60s — stable, save API calls
+        Phase 3 (720-900s):          15s — resolution window
+        Default: 30s when no market timing available.
+        """
         try:
             await self.initialize()
         except Exception as exc:
             log.error("initialize failed: %s: %s", type(exc).__name__, exc)
             return
+
+        self._last_market_opens_at = None
+        self._last_market_closes_at = None
 
         while not stop.is_set():
             try:
@@ -148,8 +194,12 @@ class Bot:
                 except Exception:
                     pass
 
+            # Adaptive interval based on market lifecycle
+            adaptive_interval = self._adaptive_interval()
+            log.info("next scan in %ds (adaptive)", adaptive_interval)
+
             try:
-                await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+                await asyncio.wait_for(stop.wait(), timeout=adaptive_interval)
             except asyncio.TimeoutError:
                 pass
 

@@ -45,10 +45,22 @@ export interface Prediction {
   signal_strength: number;
   approved: boolean;
   reasons: string[] | null;
+  // Timestamps
+  observed_at: string | null;
+  decided_at: string | null;
   recorded_at: string;
+  // Contract timing
+  opened_at: string | null;
+  closes_at: string | null;
+  volume_ratio: number | null;
+  // Outcome IDs
+  outcome1_id: string | null;
+  outcome2_id: string | null;
+  // Resolution
   outcome_resolution: string;
   actual_price: number | null;
   resolved_at: string | null;
+  resolved_outcome_id: string | null;
   prediction_correct: boolean | null;
   brier_score: number | null;
 }

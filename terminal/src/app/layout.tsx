@@ -37,12 +37,6 @@ export default function RootLayout({
             >
               Predictions
             </a>
-            <a
-              href="/trading"
-              className="hover:text-emerald-400 transition-colors"
-            >
-              Trading
-            </a>
           </div>
         </nav>
         <main className="p-6">{children}</main>

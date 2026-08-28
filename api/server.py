@@ -277,10 +277,22 @@ async def get_predictions(
             signal_strength=float(p.signal_strength),
             approved=p.approved,
             reasons=p.reasons,
+            # Timestamps
+            observed_at=p.observed_at.isoformat() if p.observed_at else None,
+            decided_at=p.decided_at.isoformat() if p.decided_at else None,
             recorded_at=p.recorded_at.isoformat() if p.recorded_at else "",
+            # Contract timing
+            opened_at=p.opened_at.isoformat() if p.opened_at else None,
+            closes_at=p.closes_at.isoformat() if p.closes_at else None,
+            volume_ratio=float(p.volume_ratio) if p.volume_ratio else None,
+            # Outcome IDs
+            outcome1_id=p.outcome1_id or None,
+            outcome2_id=p.outcome2_id or None,
+            # Resolution
             outcome_resolution=p.outcome_resolution or "pending",
             actual_price=float(p.actual_price) if p.actual_price else None,
             resolved_at=p.resolved_at.isoformat() if p.resolved_at else None,
+            resolved_outcome_id=p.resolved_outcome_id or None,
             prediction_correct=p.prediction_correct,
             brier_score=float(p.brier_score) if p.brier_score else None,
         )
