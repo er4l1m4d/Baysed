@@ -205,6 +205,35 @@ class MarketRepository(ABC):
 
 
 # ---------------------------------------------------------------------------
+# Market Outcome Repository
+# ---------------------------------------------------------------------------
+
+class MarketOutcomeRepository(ABC):
+    """Abstract interface for immutable market outcomes.
+
+    Each resolved market has exactly one outcome record.
+    Predictions join to this to compute calibration/Brier.
+    """
+
+    @abstractmethod
+    async def save_outcome(self, outcome: dict[str, Any]) -> None:
+        """Save a market outcome (idempotent — updates if already exists)."""
+        ...
+
+    @abstractmethod
+    async def get_outcome(self, market_id: str) -> dict[str, Any] | None:
+        """Get the resolved outcome for a market."""
+        ...
+
+    @abstractmethod
+    async def get_outcomes(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Get resolved outcomes with pagination."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Event Log Repository
 # ---------------------------------------------------------------------------
 

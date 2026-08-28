@@ -94,7 +94,8 @@ class PostgresPredictionRepository(PredictionRepository):
         correct = await self.count_correct()
         brier_mean = await self.get_brier_mean()
 
-        # Calibration curve
+        # Calibration curve: probabilistic evaluation (predicted_prob vs actual outcome)
+        # Each bucket: avg_predicted vs actual_rate (fraction of YES outcomes)
         curve = []
         for bucket_idx in range(10):
             low = bucket_idx * 0.1
@@ -103,7 +104,6 @@ class PostgresPredictionRepository(PredictionRepository):
                 select(
                     func.count(Prediction.id),
                     func.avg(Prediction.probability),
-                    func.sum(func.cast(Prediction.prediction_correct, Integer)),
                 ).where(
                     Prediction.probability >= low,
                     Prediction.probability < high,
@@ -114,8 +114,19 @@ class PostgresPredictionRepository(PredictionRepository):
             count = row[0] or 0
             if count > 0:
                 avg_prob = float(row[1]) if row[1] else 0
-                bucket_correct = row[2] or 0
-                actual_rate = bucket_correct / count
+
+                # Compute actual YES rate from outcome_resolution (not prediction_correct)
+                actual_result = await self.session.execute(
+                    select(func.count(Prediction.id)).where(
+                        Prediction.probability >= low,
+                        Prediction.probability < high,
+                        Prediction.outcome_resolution != "pending",
+                        Prediction.outcome_resolution == "yes_won",
+                    )
+                )
+                yes_count = actual_result.scalar() or 0
+                actual_rate = yes_count / count
+
                 curve.append({
                     "bucket": f"{int(low*100)}-{int(high*100)}%",
                     "count": count,
@@ -453,6 +464,76 @@ class PostgresMarketRepository(MarketRepository):
 
     async def clear_active_market(self) -> None:
         await self.session.execute(text("DELETE FROM active_market WHERE id = 1"))
+
+
+class PostgresMarketOutcomeRepository(MarketOutcomeRepository):
+    """PostgreSQL implementation of immutable market outcomes."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def save_outcome(self, outcome: dict[str, Any]) -> None:
+        await self.session.execute(
+            text("""
+                INSERT INTO market_outcomes
+                    (market_id, event_id, resolved_outcome_id, outcome_resolution,
+                     event_close_value, btc_close_price, resolved_at)
+                VALUES (:market_id, :event_id, :resolved_outcome_id, :outcome_resolution,
+                        :event_close_value, :btc_close_price, :resolved_at)
+                ON CONFLICT (market_id) DO UPDATE SET
+                    resolved_outcome_id = :resolved_outcome_id,
+                    outcome_resolution = :outcome_resolution,
+                    event_close_value = :event_close_value,
+                    btc_close_price = :btc_close_price,
+                    resolved_at = :resolved_at
+            """),
+            {
+                "market_id": outcome["market_id"],
+                "event_id": outcome.get("event_id", ""),
+                "resolved_outcome_id": outcome.get("resolved_outcome_id", ""),
+                "outcome_resolution": outcome.get("outcome_resolution", ""),
+                "event_close_value": outcome.get("event_close_value"),
+                "btc_close_price": outcome.get("btc_close_price"),
+                "resolved_at": outcome.get("resolved_at", datetime.now(timezone.utc)),
+            },
+        )
+        await self.session.commit()
+
+    async def get_outcome(self, market_id: str) -> dict[str, Any] | None:
+        result = await self.session.execute(
+            text("SELECT market_id, event_id, resolved_outcome_id, outcome_resolution, event_close_value, btc_close_price, resolved_at FROM market_outcomes WHERE market_id = :market_id"),
+            {"market_id": market_id},
+        )
+        row = result.fetchone()
+        if not row:
+            return None
+        return {
+            "market_id": row[0],
+            "event_id": row[1],
+            "resolved_outcome_id": row[2],
+            "outcome_resolution": row[3],
+            "event_close_value": row[4],
+            "btc_close_price": float(row[5]) if row[5] else None,
+            "resolved_at": row[6].isoformat() if row[6] else None,
+        }
+
+    async def get_outcomes(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        result = await self.session.execute(
+            text("SELECT market_id, event_id, resolved_outcome_id, outcome_resolution, event_close_value, btc_close_price, resolved_at FROM market_outcomes ORDER BY resolved_at DESC LIMIT :limit OFFSET :offset"),
+            {"limit": limit, "offset": offset},
+        )
+        return [
+            {
+                "market_id": row[0],
+                "event_id": row[1],
+                "resolved_outcome_id": row[2],
+                "outcome_resolution": row[3],
+                "event_close_value": row[4],
+                "btc_close_price": float(row[5]) if row[5] else None,
+                "resolved_at": row[6].isoformat() if row[6] else None,
+            }
+            for row in result.fetchall()
+        ]
 
 
 class PostgresEventLogRepository(EventLogRepository):

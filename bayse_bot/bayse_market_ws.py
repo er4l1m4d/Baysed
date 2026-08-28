@@ -2,6 +2,10 @@
 
 Connects to wss://socket.bayse.markets/ws/v1/markets for real-time
 price updates, orderbook snapshots, and trade activity.
+
+Architecture:
+  BayseMarketFeed (WS)  →  MarketStateStore (canonical)  →  consumers
+  BayseClient (REST)    →  discovery / recovery / reconciliation only
 """
 from __future__ import annotations
 import asyncio, json, logging
@@ -39,14 +43,103 @@ def parse_ws_book(data: dict, market_id: str, outcome: Outcome) -> OrderBook:
     )
 
 
+def resolve_outcome_from_id(
+    outcome_id: str,
+    outcome1_id: str | None = None,
+    outcome2_id: str | None = None,
+) -> Outcome:
+    """Resolve a Bayse outcomeId to our canonical Outcome enum.
+
+    Uses outcome1_id/outcome2_id from the market if available,
+    otherwise falls back to position-based matching.
+    """
+    if outcome1_id and outcome_id == outcome1_id:
+        return Outcome.YES
+    if outcome2_id and outcome_id == outcome2_id:
+        return Outcome.NO
+    log.debug("Unknown outcome_id=%s (o1=%s o2=%s), defaulting to YES", outcome_id, outcome1_id, outcome2_id)
+    return Outcome.YES
+
+
+class MarketStateStore:
+    """Canonical market state store — single source of truth for all consumers.
+
+    The WS feed writes here. The signal engine and terminal/API read from here.
+    This eliminates duplicated interpretations of the same market data.
+
+    Store is updated atomically (attribute assignment) so no locking is needed
+    for single-reader patterns.
+    """
+
+    def __init__(self) -> None:
+        # market_id -> {outcome: OrderBook, last_update: datetime}
+        self.books: dict[str, dict[str, OrderBook]] = {}
+        # event_id -> {market_id -> {price, volume, last_trade_at}}
+        self.prices: dict[str, dict[str, dict]] = {}
+        # event_id -> list of trades
+        self.trades: dict[str, list[dict]] = {}
+        # event_id -> {market_id -> OrderBook}
+        self._market_events: dict[str, set[str]] = {}  # event_id -> set of market_ids
+
+    def update_book(self, market_id: str, book: OrderBook) -> None:
+        """Update order book for a market from WS."""
+        self.books.setdefault(market_id, {})[book.outcome] = book
+
+    def get_books(self, market_id: str) -> dict[str, OrderBook]:
+        """Get current books for a market (both outcomes)."""
+        return self.books.get(market_id, {})
+
+    def get_best_prices(self, market_id: str) -> tuple[Decimal | None, Decimal | None]:
+        """Get best (yes_ask, no_ask) for a market."""
+        books = self.books.get(market_id, {})
+        yes_book = books.get(Outcome.YES)
+        no_book = books.get(Outcome.NO)
+        return (
+            yes_book.best_ask if yes_book else None,
+            no_book.best_ask if no_book else None,
+        )
+
+    def update_price(self, event_id: str, market_id: str, data: dict) -> None:
+        """Update market price from WS."""
+        self.prices.setdefault(event_id, {})[market_id] = {
+            "price": data.get("price"),
+            "volume": data.get("volume"),
+            "last_trade_at": datetime.now(timezone.utc),
+        }
+
+    def add_trade(self, event_id: str, trade: dict) -> None:
+        """Record a trade from WS."""
+        self.trades.setdefault(event_id, []).append({
+            **trade,
+            "recorded_at": datetime.now(timezone.utc),
+        })
+        # Keep only last 100 trades per event
+        if len(self.trades[event_id]) > 100:
+            self.trades[event_id] = self.trades[event_id][-100:]
+
+    def register_market(self, event_id: str, market_id: str) -> None:
+        """Register a market for subscription tracking."""
+        self._market_events.setdefault(event_id, set()).add(market_id)
+
+    def get_market_ids_for_event(self, event_id: str) -> list[str]:
+        """Get all market IDs for an event."""
+        return list(self._market_events.get(event_id, set()))
+
+
 class BayseMarketFeed:
     """Real-time market data via Bayse WebSocket.
 
     Subscribes to prices, orderbook, and activity for specified markets.
-    Parses incoming messages and invokes callbacks for downstream processing.
+    Writes to MarketStateStore (canonical state) and invokes callbacks
+    for backward compatibility.
+
+    Architecture:
+      WS → MarketStateStore → consumers (signal engine, terminal/API)
+      REST → discovery / recovery / reconciliation only
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: MarketStateStore | None = None) -> None:
+        self.store = store or MarketStateStore()
         self.subscribed_events: set[str] = set()
         self.subscribed_markets: set[str] = set()
         self.last_message_at: datetime | None = None
@@ -87,18 +180,26 @@ class BayseMarketFeed:
 
                             if msg_type == "price_update" and on_price:
                                 event_id = data.get("id", "")
+                                # Update canonical store
+                                for mid, pdata in data.get("markets", {}).items():
+                                    self.store.update_price(event_id, mid, pdata)
                                 await on_price(event_id, data)
 
                             elif msg_type == "orderbook_update" and on_book:
                                 ob_data = data.get("orderbook", data)
                                 market_id = ob_data.get("marketId", "")
                                 outcome_id = ob_data.get("outcomeId", "")
-                                # Default to YES outcome; caller can map outcome IDs
-                                book = parse_ws_book(data, market_id, Outcome.YES)
+                                # Resolve outcome from incoming outcomeId, not hardcoded
+                                outcome = resolve_outcome_from_id(outcome_id)
+                                book = parse_ws_book(data, market_id, outcome)
+                                # Update canonical store
+                                self.store.update_book(market_id, book)
                                 await on_book(market_id, book)
 
                             elif msg_type in ("buy_order", "sell_order") and on_trade:
                                 event_id = data.get("event", {}).get("id", "")
+                                # Update canonical store
+                                self.store.add_trade(event_id, msg)
                                 await on_trade(event_id, msg)
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:

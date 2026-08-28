@@ -45,6 +45,23 @@ class EventType(StrEnum):
     PREDICTION_RECORDED = "prediction_recorded"
 
 
+@dataclass(frozen=True)
+class MarketOutcome:
+    """Immutable outcome of a resolved market.
+
+    This is the canonical resolution record — once set, it never changes.
+    Predictions join to this via (market_id, resolved_at) to compute
+    calibration and Brier scores.
+    """
+    market_id: str
+    event_id: str
+    resolved_outcome_id: str  # raw Bayse value
+    outcome_resolution: str   # "yes_won" or "no_won"
+    event_close_value: str | None = None
+    btc_close_price: Decimal | None = None
+    resolved_at: datetime | None = None
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 

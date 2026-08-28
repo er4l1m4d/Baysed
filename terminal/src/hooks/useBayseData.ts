@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   getStatus,
   getCalibration,
@@ -140,11 +140,17 @@ export function useTrades(limit = 50) {
   return { trades, loading };
 }
 
+type PriceSource = "live" | "stale" | "fallback";
+
 export function useLivePrice() {
   const [price, setPrice] = useState<number | null>(null);
   const [momentum, setMomentum] = useState(0);
   const [volatility, setVolatility] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [source, setSource] = useState<PriceSource>("fallback");
+  const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
+  const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
+  const lastPriceAtRef = useRef<Date | null>(null);
 
   useEffect(() => {
     setConnected(true);
@@ -153,13 +159,35 @@ export function useLivePrice() {
       setPrice(p);
       setMomentum(m);
       setVolatility(v);
+      setSource("live");
+      const now = new Date();
+      lastPriceAtRef.current = now;
+      setLastUpdateAt(now);
+      setSecondsSinceUpdate(0);
     });
+
+    // Check staleness every second
+    const stalenessInterval = setInterval(() => {
+      if (lastPriceAtRef.current) {
+        const elapsed = Math.floor((Date.now() - lastPriceAtRef.current.getTime()) / 1000);
+        setSecondsSinceUpdate(elapsed);
+
+        if (elapsed > 30) {
+          setSource("stale");
+        } else if (elapsed > 5) {
+          setSource("live"); // Still live but slightly delayed
+        }
+      }
+    }, 1000);
 
     return () => {
       unsub();
       setConnected(false);
+      setSource("fallback");
+      lastPriceAtRef.current = null;
+      clearInterval(stalenessInterval);
     };
   }, []);
 
-  return { price, momentum, volatility, connected };
+  return { price, momentum, volatility, connected, source, lastUpdateAt, secondsSinceUpdate };
 }

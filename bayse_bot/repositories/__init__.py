@@ -9,7 +9,7 @@ import ssl
 
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
-    RiskRepository, MarketRepository, EventLogRepository,
+    RiskRepository, MarketRepository, MarketOutcomeRepository, EventLogRepository,
 )
 
 
@@ -23,6 +23,7 @@ class RepositorySet:
         bot_status: BotStatusRepository,
         risk: RiskRepository,
         market: MarketRepository,
+        market_outcome: MarketOutcomeRepository,
         event_log: EventLogRepository,
     ):
         self.predictions = predictions
@@ -30,6 +31,7 @@ class RepositorySet:
         self.bot_status = bot_status
         self.risk = risk
         self.market = market
+        self.market_outcome = market_outcome
         self.event_log = event_log
 
 
@@ -107,6 +109,19 @@ async def create_repositories(database_url: str) -> RepositorySet:
                 recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             )
         """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS market_outcomes (
+                id SERIAL PRIMARY KEY,
+                market_id VARCHAR(255) NOT NULL UNIQUE,
+                event_id VARCHAR(255) NOT NULL,
+                resolved_outcome_id VARCHAR(255) NOT NULL,
+                outcome_resolution VARCHAR(50) NOT NULL,
+                event_close_value TEXT,
+                btc_close_price NUMERIC,
+                resolved_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        """))
 
     def get_session():
         return session_factory()
@@ -114,7 +129,8 @@ async def create_repositories(database_url: str) -> RepositorySet:
     from .postgres import (
         PostgresPredictionRepository, PostgresTradeRepository,
         PostgresBotStatusRepository, PostgresRiskRepository,
-        PostgresMarketRepository, PostgresEventLogRepository,
+        PostgresMarketRepository, PostgresMarketOutcomeRepository,
+        PostgresEventLogRepository,
     )
 
     return RepositorySet(
@@ -123,5 +139,6 @@ async def create_repositories(database_url: str) -> RepositorySet:
         bot_status=PostgresBotStatusRepository(get_session()),
         risk=PostgresRiskRepository(get_session()),
         market=PostgresMarketRepository(get_session()),
+        market_outcome=PostgresMarketOutcomeRepository(get_session()),
         event_log=PostgresEventLogRepository(get_session()),
     )

@@ -5,21 +5,46 @@ import { useBotStatus, useCalibration, useLivePrice, usePredictions, useTrades }
 import type { Prediction } from "@/lib/api";
 
 function PriceCard() {
-  const { price, momentum, volatility, connected } = useLivePrice();
+  const { price, momentum, volatility, connected, source, lastUpdateAt, secondsSinceUpdate } = useLivePrice();
   const { status } = useBotStatus();
 
   const displayPrice = price || status?.last_btc_price;
+
+  const sourceConfig = {
+    live: {
+      label: "LIVE",
+      sublabel: "Bayse WS",
+      color: "bg-emerald-900 text-emerald-400",
+      dotColor: "bg-emerald-400 animate-pulse",
+    },
+    stale: {
+      label: "STALE",
+      sublabel: `${secondsSinceUpdate}s ago`,
+      color: "bg-yellow-900 text-yellow-400",
+      dotColor: "bg-yellow-400",
+    },
+    fallback: {
+      label: "FALLBACK",
+      sublabel: "Bot snapshot",
+      color: "bg-red-900 text-red-400",
+      dotColor: "bg-red-400",
+    },
+  };
+
+  const config = sourceConfig[source];
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-gray-400">BTC/USD</span>
         <div className="flex items-center gap-2">
-          <span
-            className={`text-xs px-2 py-0.5 rounded ${connected ? "bg-emerald-900 text-emerald-400" : "bg-red-900 text-red-400"}`}
-          >
-            {connected ? "Connected" : "Disconnected"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${config.dotColor}`} />
+            <span className={`text-xs px-2 py-0.5 rounded ${config.color}`}>
+              {config.label}
+            </span>
+          </div>
+          <span className="text-xs text-gray-600">{config.sublabel}</span>
           {status?.is_running && (
             <span className="text-xs px-2 py-0.5 rounded bg-blue-900 text-blue-400">
               Bot Running

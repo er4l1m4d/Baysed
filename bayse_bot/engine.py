@@ -66,7 +66,7 @@ class Bot:
         self.risk = RiskManager(settings, repos.risk)
         self.strategy = strategy_by_name(settings.strategy)
         self.pred_rec = PredictionRecorder(repos.predictions)
-        self.resolver = ResolutionTracker(repos.predictions)
+        self.resolver = ResolutionTracker(repos.predictions, repos.market_outcome)
 
     async def initialize(self) -> None:
         """Load persisted state on startup."""
