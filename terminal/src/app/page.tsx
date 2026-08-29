@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useBotStatus, useCalibration, useLivePrice, usePredictions, useTrades } from "@/hooks/useBayseData";
-import type { Prediction } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { useBotStatus, useCalibration, useLivePrice, useLiveMarketState, usePredictions, useTrades } from "@/hooks/useBayseData";
 
 function PriceCard() {
   const { price, momentum, volatility, connected, source, lastUpdateAt, secondsSinceUpdate } = useLivePrice();
@@ -67,7 +66,6 @@ function PriceCard() {
 
 function StatsRow() {
   const { status, loading } = useBotStatus();
-  const { calibration } = useCalibration();
 
   if (loading) {
     return (
@@ -117,21 +115,122 @@ function StatsRow() {
   );
 }
 
-function MarketCard({
-  prediction,
-}: {
-  prediction: {
-    title: string;
-    strike_price: number;
-    current_btc_price: number;
-    seconds_remaining: number;
-    yes_ask: number | null;
-    no_ask: number | null;
-    predicted_outcome: string;
-    probability: number | null;
-    edge: number | null;
+function LiveMarketCard() {
+  const { liveMarket, loading } = useLiveMarketState();
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  // Live countdown: update every second from closes_at
+  useEffect(() => {
+    if (!liveMarket?.closes_at || !liveMarket.is_active) {
+      setCountdown(null);
+      return;
+    }
+
+    const closesAt = new Date(liveMarket.closes_at);
+
+    function updateCountdown() {
+      const now = new Date();
+      const remaining = Math.max(0, Math.floor((closesAt.getTime() - now.getTime()) / 1000));
+      setCountdown(remaining);
+    }
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [liveMarket?.closes_at, liveMarket?.is_active]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
   };
-}) {
+
+  if (loading) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 animate-pulse">
+        <div className="h-6 bg-gray-800 rounded w-40 mb-4" />
+        <div className="grid grid-cols-3 gap-4">
+          <div className="h-16 bg-gray-800 rounded" />
+          <div className="h-16 bg-gray-800 rounded" />
+          <div className="h-16 bg-gray-800 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!liveMarket || !liveMarket.is_active) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Live Market</h2>
+          <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-500">No active market</span>
+        </div>
+        <div className="text-gray-500 text-sm">Waiting for market to open...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900 border border-blue-800 rounded-lg p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold">Live Market</h2>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-xs px-2 py-0.5 rounded bg-emerald-900 text-emerald-400">LIVE</span>
+        </div>
+      </div>
+
+      <div className="text-sm text-gray-400 mb-3">{liveMarket.title}</div>
+
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div>
+          <div className="text-xs text-gray-500">Strike</div>
+          <div className="text-lg font-mono text-white">
+            ${liveMarket.strike_price?.toLocaleString() || "--"}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">Time Left</div>
+          <div className={`text-lg font-mono ${countdown !== null && countdown < 120 ? "text-yellow-400" : "text-white"}`}>
+            {countdown !== null ? formatTime(countdown) : "--"}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">Signal</div>
+          <div className={`text-lg font-bold ${liveMarket.model_predicted_outcome === "YES" ? "text-emerald-400" : "text-red-400"}`}>
+            {liveMarket.model_predicted_outcome || "--"}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        <div className="flex-1 bg-emerald-900/30 border border-emerald-800 rounded px-3 py-2 text-center">
+          <div className="text-xs text-emerald-400">UP</div>
+          <div className="text-sm font-mono text-emerald-300">
+            {liveMarket.yes_ask?.toFixed(2) || "--"}
+          </div>
+        </div>
+        <div className="flex-1 bg-red-900/30 border border-red-800 rounded px-3 py-2 text-center">
+          <div className="text-xs text-red-400">DOWN</div>
+          <div className="text-sm font-mono text-red-300">
+            {liveMarket.no_ask?.toFixed(2) || "--"}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-between text-xs text-gray-500">
+        <span>Model: {liveMarket.model_probability ? `${(liveMarket.model_probability * 100).toFixed(1)}%` : "--"}</span>
+        <span className={liveMarket.edge && liveMarket.edge > 0 ? "text-emerald-400" : "text-red-400"}>
+          Edge: {liveMarket.edge ? `${liveMarket.edge > 0 ? "+" : ""}${liveMarket.edge.toFixed(4)}` : "--"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RecentPredictions() {
+  const { predictions, loading } = usePredictions(20);
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -139,228 +238,41 @@ function MarketCard({
   };
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-      <div className="text-sm font-medium text-gray-300 mb-3">{prediction.title}</div>
-      <div className="grid grid-cols-2 gap-4 mb-3">
-        <div>
-          <div className="text-xs text-gray-500">Strike</div>
-          <div className="text-lg font-mono text-white">
-            ${prediction.strike_price.toLocaleString()}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">Time Left</div>
-          <div className="text-lg font-mono text-white">
-            {formatTime(prediction.seconds_remaining)}
-          </div>
-        </div>
-      </div>
-      <div className="flex gap-2 mb-3">
-        <div className="flex-1 bg-emerald-900/30 border border-emerald-800 rounded px-3 py-2 text-center">
-          <div className="text-xs text-emerald-400">UP</div>
-          <div className="text-sm font-mono text-emerald-300">
-            {prediction.yes_ask?.toFixed(2) || "--"}
-          </div>
-        </div>
-        <div className="flex-1 bg-red-900/30 border border-red-800 rounded px-3 py-2 text-center">
-          <div className="text-xs text-red-400">DOWN</div>
-          <div className="text-sm font-mono text-red-300">
-            {prediction.no_ask?.toFixed(2) || "--"}
-          </div>
-        </div>
-      </div>
-      <div className="flex justify-between text-xs text-gray-500">
-        <span>Model: {prediction.probability ? `${(prediction.probability * 100).toFixed(1)}%` : "--"}</span>
-        <span className={prediction.edge && prediction.edge > 0 ? "text-emerald-400" : "text-red-400"}>
-          Edge: {prediction.edge ? `${prediction.edge > 0 ? "+" : ""}${prediction.edge.toFixed(4)}` : "--"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function OrderForm() {
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
-  const [outcome, setOutcome] = useState<"UP" | "DOWN">("UP");
-  const [amount, setAmount] = useState("100");
-  const [price, setPrice] = useState("0.58");
-  const [orderType, setOrderType] = useState<"LIMIT" | "MARKET">("LIMIT");
-
-  return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Place Order</h3>
-
-      <div className="space-y-4">
-        <div className="flex gap-2">
-          <button
-            onClick={() => setSide("BUY")}
-            className={`flex-1 py-2 rounded font-medium ${
-              side === "BUY"
-                ? "bg-emerald-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            BUY
-          </button>
-          <button
-            onClick={() => setSide("SELL")}
-            className={`flex-1 py-2 rounded font-medium ${
-              side === "SELL"
-                ? "bg-red-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            SELL
-          </button>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => setOutcome("UP")}
-            className={`flex-1 py-2 rounded font-medium ${
-              outcome === "UP"
-                ? "bg-emerald-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            UP (Yes)
-          </button>
-          <button
-            onClick={() => setOutcome("DOWN")}
-            className={`flex-1 py-2 rounded font-medium ${
-              outcome === "DOWN"
-                ? "bg-red-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            DOWN (No)
-          </button>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => setOrderType("LIMIT")}
-            className={`flex-1 py-2 rounded font-medium ${
-              orderType === "LIMIT"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            LIMIT
-          </button>
-          <button
-            onClick={() => setOrderType("MARKET")}
-            className={`flex-1 py-2 rounded font-medium ${
-              orderType === "MARKET"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            MARKET
-          </button>
-        </div>
-
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Amount (USD)</label>
-          <input
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
-          />
-        </div>
-
-        {orderType === "LIMIT" && (
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Price</label>
-            <input
-              type="number"
-              step="0.01"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-        )}
-
-        <div className="bg-gray-800 rounded p-3 space-y-1 text-sm">
-          <div className="flex justify-between">
-            <span className="text-gray-400">Side</span>
-            <span className={side === "BUY" ? "text-emerald-400" : "text-red-400"}>
-              {side}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Outcome</span>
-            <span>{outcome}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Amount</span>
-            <span>${amount}</span>
-          </div>
-          {orderType === "LIMIT" && (
-            <div className="flex justify-between">
-              <span className="text-gray-400">Est. Shares</span>
-              <span>{(parseFloat(amount) / parseFloat(price)).toFixed(2)}</span>
-            </div>
-          )}
-        </div>
-
-        <button
-          className={`w-full py-3 rounded font-bold text-white ${
-            side === "BUY"
-              ? "bg-emerald-600 hover:bg-emerald-500"
-              : "bg-red-600 hover:bg-red-500"
-          }`}
-        >
-          {side} {outcome}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function TradeHistory() {
-  const { trades, loading } = useTrades(20);
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Trade History</h3>
+      <h2 className="text-lg font-semibold mb-4">Recent Predictions</h2>
       {loading ? (
-        <div className="text-gray-500">Loading trades...</div>
-      ) : trades.length === 0 ? (
-        <div className="text-center text-gray-500 py-8">No trades yet</div>
+        <div className="text-gray-500">Loading predictions...</div>
+      ) : predictions.length === 0 ? (
+        <div className="text-gray-500 text-sm">No predictions yet. Start the bot to collect data.</div>
       ) : (
         <div className="space-y-2 max-h-96 overflow-y-auto">
-          {trades.map((trade) => (
+          {predictions.map((pred) => (
             <div
-              key={trade.id}
-              className="flex justify-between items-center py-2 border-b border-gray-800"
+              key={pred.id}
+              className="flex justify-between items-center py-2 border-b border-gray-800 text-sm"
             >
-              <div>
-                <div className="text-sm font-medium">
-                  {trade.side} {trade.outcome}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {new Date(trade.recorded_at).toLocaleString()}
+              <div className="flex-1">
+                <div className="text-gray-300 truncate max-w-[200px]">{pred.title}</div>
+                <div className="text-xs text-gray-600">
+                  {pred.recorded_at ? new Date(pred.recorded_at).toLocaleTimeString() : ""}
+                  {pred.seconds_remaining != null && (
+                    <span className="ml-2">{formatTime(pred.seconds_remaining)} left</span>
+                  )}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-sm font-mono">${trade.amount}</div>
-                <div className="text-xs text-gray-500">@ {trade.price}</div>
-              </div>
-              <div>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded ${
-                    trade.status === "filled"
-                      ? "bg-emerald-900 text-emerald-400"
-                      : trade.status === "pending"
-                        ? "bg-yellow-900 text-yellow-400"
-                        : "bg-gray-800 text-gray-400"
-                  }`}
-                >
-                  {trade.status}
-                </span>
+              <div className="text-right ml-4">
+                <div className={`font-mono ${pred.predicted_outcome === "YES" ? "text-emerald-400" : "text-red-400"}`}>
+                  {pred.probability ? `${(pred.probability * 100).toFixed(1)}%` : "--"}
+                </div>
+                <div className="text-xs text-gray-600">
+                  {pred.outcome_resolution === "pending" ? (
+                    <span className="text-yellow-600">pending</span>
+                  ) : pred.outcome_resolution === "yes_won" ? (
+                    <span className="text-emerald-600">won YES</span>
+                  ) : (
+                    <span className="text-red-600">won NO</span>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -408,7 +320,6 @@ function PositionSummary() {
 }
 
 export default function Dashboard() {
-  const { predictions, loading: predictionsLoading } = usePredictions(5);
   const [tradingOpen, setTradingOpen] = useState(false);
 
   return (
@@ -417,21 +328,8 @@ export default function Dashboard() {
 
       <PriceCard />
       <StatsRow />
-
-      <div>
-        <h2 className="text-lg font-semibold mb-3">Recent Predictions</h2>
-        {predictionsLoading ? (
-          <div className="text-gray-500">Loading predictions...</div>
-        ) : predictions.length === 0 ? (
-          <div className="text-gray-500">No predictions yet. Start the bot to collect data.</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {predictions.map((pred) => (
-              <MarketCard key={pred.market_id} prediction={pred} />
-            ))}
-          </div>
-        )}
-      </div>
+      <LiveMarketCard />
+      <RecentPredictions />
 
       {/* Collapsible Trading Section */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg">
@@ -446,15 +344,7 @@ export default function Dashboard() {
         </button>
         {tradingOpen && (
           <div className="px-4 pb-4 border-t border-gray-800 pt-4">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 space-y-6">
-                <OrderForm />
-                <TradeHistory />
-              </div>
-              <div className="space-y-6">
-                <PositionSummary />
-              </div>
-            </div>
+            <PositionSummary />
           </div>
         )}
       </div>

@@ -64,6 +64,7 @@ class StatusResponse(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    id: int
     market_id: str
     event_id: str
     title: str
@@ -103,6 +104,24 @@ class PredictionResponse(BaseModel):
     resolved_outcome_id: str | None = None
     prediction_correct: bool | None
     brier_score: float | None
+
+
+class LiveMarketResponse(BaseModel):
+    """Canonical live market state for the terminal."""
+    market_id: str | None = None
+    event_id: str | None = None
+    title: str | None = None
+    strike_price: float | None = None
+    btc_price: float | None = None
+    opens_at: str | None = None
+    closes_at: str | None = None
+    seconds_remaining: int | None = None
+    yes_ask: float | None = None
+    no_ask: float | None = None
+    model_probability: float | None = None
+    model_predicted_outcome: str | None = None
+    edge: float | None = None
+    is_active: bool = False
 
 
 class CalibrationResponse(BaseModel):
@@ -197,6 +216,52 @@ async def debug():
     }
 
 
+@app.get("/state", response_model=LiveMarketResponse)
+async def get_live_state(db: AsyncSession = Depends(get_db)):
+    """Canonical live market state for the terminal.
+
+    Returns the current active market with live countdown.
+    The terminal should use this for the LIVE MARKET section,
+    not prediction snapshots.
+    """
+    live_price = float(shared_state.btc_price) if shared_state.btc_price else None
+
+    # Get the most recent prediction (closest to current market state)
+    result = await db.execute(
+        select(Prediction)
+        .where(Prediction.outcome_resolution == "pending")
+        .order_by(Prediction.recorded_at.desc())
+        .limit(1)
+    )
+    latest = result.scalar_one_or_none()
+
+    if not latest:
+        return LiveMarketResponse(btc_price=live_price, is_active=False)
+
+    # Calculate live seconds remaining from closes_at
+    now = datetime.now(timezone.utc)
+    seconds_remaining = None
+    if latest.closes_at:
+        seconds_remaining = max(0, int((latest.closes_at - now).total_seconds()))
+
+    return LiveMarketResponse(
+        market_id=latest.market_id,
+        event_id=latest.event_id,
+        title=latest.title,
+        strike_price=float(latest.strike_price) if latest.strike_price else None,
+        btc_price=live_price,
+        opens_at=latest.opened_at.isoformat() if latest.opened_at else None,
+        closes_at=latest.closes_at.isoformat() if latest.closes_at else None,
+        seconds_remaining=seconds_remaining,
+        yes_ask=float(latest.yes_ask) if latest.yes_ask else None,
+        no_ask=float(latest.no_ask) if latest.no_ask else None,
+        model_probability=float(latest.probability) if latest.probability else None,
+        model_predicted_outcome=latest.predicted_outcome or None,
+        edge=float(latest.edge) if latest.edge else None,
+        is_active=seconds_remaining is not None and seconds_remaining > 0,
+    )
+
+
 @app.get("/status", response_model=StatusResponse)
 async def get_status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotStatus).where(BotStatus.id == 1))
@@ -256,6 +321,7 @@ async def get_predictions(
 
     return [
         PredictionResponse(
+            id=p.id,
             market_id=p.market_id,
             event_id=p.event_id,
             title=p.title,
@@ -318,58 +384,35 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
         )
         brier_mean = brier_result.scalar()
 
-        # Calibration curve
+        # Calibration curve: single grouped SQL query
+        # Uses actual YES rate from outcome_resolution (not prediction_correct)
+        curve_result = await db.execute(text("""
+            SELECT
+                FLOOR(probability * 10) AS bucket_idx,
+                COUNT(*) AS cnt,
+                AVG(probability) AS avg_prob,
+                AVG(CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END) AS actual_yes_rate
+            FROM predictions
+            WHERE outcome_resolution != 'pending'
+              AND probability IS NOT NULL
+            GROUP BY FLOOR(probability * 10)
+            ORDER BY bucket_idx
+        """))
         curve = []
-        for bucket_idx in range(10):
+        for row in curve_result.fetchall():
+            bucket_idx = int(row[0])
+            count = row[1] or 0
+            avg_prob = float(row[2]) if row[2] else 0
+            actual_rate = float(row[3]) if row[3] else 0
             low = bucket_idx * 0.1
             high = (bucket_idx + 1) * 0.1
-            bucket_result = await db.execute(
-                select(
-                    func.count(Prediction.id),
-                    func.avg(Prediction.probability),
-                    func.count(Prediction.id),
-                ).where(
-                    Prediction.probability >= low,
-                    Prediction.probability < high,
-                    Prediction.outcome_resolution != "pending",
-                    Prediction.prediction_correct == True,
-                )
-            )
-            correct_in_bucket = (await db.execute(
-                select(func.count(Prediction.id)).where(
-                    Prediction.probability >= low,
-                    Prediction.probability < high,
-                    Prediction.outcome_resolution != "pending",
-                    Prediction.prediction_correct == True,
-                )
-            )).scalar() or 0
-
-            total_in_bucket = (await db.execute(
-                select(func.count(Prediction.id)).where(
-                    Prediction.probability >= low,
-                    Prediction.probability < high,
-                    Prediction.outcome_resolution != "pending",
-                )
-            )).scalar() or 0
-
-            avg_prob_result = await db.execute(
-                select(func.avg(Prediction.probability)).where(
-                    Prediction.probability >= low,
-                    Prediction.probability < high,
-                    Prediction.outcome_resolution != "pending",
-                )
-            )
-            avg_prob = avg_prob_result.scalar()
-
-            if total_in_bucket > 0:
-                actual_rate = correct_in_bucket / total_in_bucket
-                curve.append({
-                    "bucket": f"{int(low*100)}-{int(high*100)}%",
-                    "count": total_in_bucket,
-                    "avg_predicted": round(float(avg_prob) if avg_prob else 0, 4),
-                    "actual_rate": round(actual_rate, 4),
-                    "gap": round((float(avg_prob) if avg_prob else 0) - actual_rate, 4),
-                })
+            curve.append({
+                "bucket": f"{int(low*100)}-{int(high*100)}%",
+                "count": count,
+                "avg_predicted": round(avg_prob, 4),
+                "actual_rate": round(actual_rate, 4),
+                "gap": round(avg_prob - actual_rate, 4),
+            })
 
         return CalibrationResponse(
             total=total,
@@ -443,6 +486,15 @@ async def broadcast_btc_price(price: float, momentum: float, volatility: float):
         "price": price,
         "momentum": momentum,
         "volatility": volatility,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def broadcast_active_market(market_data: dict):
+    """Called by the bot to push live market state to all connected terminals."""
+    await manager.broadcast({
+        "type": "active_market",
+        "data": market_data,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 

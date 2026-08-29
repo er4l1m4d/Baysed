@@ -24,6 +24,7 @@ export interface StatusResponse {
 }
 
 export interface Prediction {
+  id: number;
   market_id: string;
   event_id: string;
   title: string;
@@ -63,6 +64,23 @@ export interface Prediction {
   resolved_outcome_id: string | null;
   prediction_correct: boolean | null;
   brier_score: number | null;
+}
+
+export interface LiveMarketState {
+  market_id: string | null;
+  event_id: string | null;
+  title: string | null;
+  strike_price: number | null;
+  btc_price: number | null;
+  opens_at: string | null;
+  closes_at: string | null;
+  seconds_remaining: number | null;
+  yes_ask: number | null;
+  no_ask: number | null;
+  model_probability: number | null;
+  model_predicted_outcome: string | null;
+  edge: number | null;
+  is_active: boolean;
 }
 
 export interface Calibration {
@@ -129,38 +147,55 @@ export async function getTrades(limit = 50, offset = 0): Promise<Trade[]> {
   return fetchApi<Trade[]>(`/trades?limit=${limit}&offset=${offset}`);
 }
 
+export async function getLiveMarketState(): Promise<LiveMarketState> {
+  return fetchApi<LiveMarketState>("/state");
+}
+
 export function connectWebSocket(
   onPrice: (price: number, momentum: number, volatility: number) => void,
-  onPrediction?: (prediction: Prediction) => void
+  onPrediction?: (prediction: Prediction) => void,
+  onActiveMarket?: (market: LiveMarketState) => void
 ): () => void {
   const wsUrl = API_BASE.replace("http", "ws") + "/ws";
-  const ws = new WebSocket(wsUrl);
+  let ws: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let shouldReconnect = true;
 
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.type === "btc_price") {
-        onPrice(data.price, data.momentum, data.volatility);
-      } else if (data.type === "prediction" && onPrediction) {
-        onPrediction(data.data);
+  function connect() {
+    ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "btc_price") {
+          onPrice(data.price, data.momentum, data.volatility);
+        } else if (data.type === "prediction" && onPrediction) {
+          onPrediction(data.data);
+        } else if (data.type === "active_market" && onActiveMarket) {
+          onActiveMarket(data.data);
+        }
+      } catch {
+        // Ignore parse errors
       }
-    } catch {
-      // Ignore parse errors
-    }
-  };
+    };
 
-  ws.onerror = () => {
-    console.error("[WS] Connection error");
-  };
+    ws.onerror = () => {
+      console.error("[WS] Connection error");
+    };
 
-  ws.onclose = () => {
-    console.log("[WS] Disconnected, reconnecting in 3s...");
-    setTimeout(() => {
-      connectWebSocket(onPrice, onPrediction);
-    }, 3000);
-  };
+    ws.onclose = () => {
+      if (shouldReconnect) {
+        console.log("[WS] Disconnected, reconnecting in 3s...");
+        reconnectTimer = setTimeout(connect, 3000);
+      }
+    };
+  }
+
+  connect();
 
   return () => {
-    ws.close();
+    shouldReconnect = false;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (ws) ws.close();
   };
 }

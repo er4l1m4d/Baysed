@@ -6,11 +6,13 @@ import {
   getCalibration,
   getPredictions,
   getTrades,
+  getLiveMarketState,
   connectWebSocket,
   type StatusResponse,
   type Calibration,
   type Prediction,
   type Trade,
+  type LiveMarketState,
 } from "@/lib/api";
 
 // Re-export Bayse WS for direct BTC price feed (fallback)
@@ -80,7 +82,7 @@ export function useCalibration() {
   return { calibration, loading };
 }
 
-export function usePredictions(limit = 50, resolution?: string) {
+export function usePredictions(limit = 20, resolution?: string) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -140,6 +142,36 @@ export function useTrades(limit = 50) {
   return { trades, loading };
 }
 
+export function useLiveMarketState() {
+  const [liveMarket, setLiveMarket] = useState<LiveMarketState | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchLiveMarket() {
+      try {
+        const data = await getLiveMarketState();
+        if (active) setLiveMarket(data);
+      } catch (e) {
+        console.error("Failed to fetch live market:", e);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchLiveMarket();
+    const interval = setInterval(fetchLiveMarket, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return { liveMarket, loading };
+}
+
 type PriceSource = "live" | "stale" | "fallback";
 
 export function useLivePrice() {
@@ -153,12 +185,14 @@ export function useLivePrice() {
   const lastPriceAtRef = useRef<Date | null>(null);
 
   useEffect(() => {
-    setConnected(true);
+    let active = true;
 
     const unsub = connectWebSocket((p, m, v) => {
+      if (!active) return;
       setPrice(p);
       setMomentum(m);
       setVolatility(v);
+      setConnected(true);
       setSource("live");
       const now = new Date();
       lastPriceAtRef.current = now;
@@ -168,19 +202,19 @@ export function useLivePrice() {
 
     // Check staleness every second
     const stalenessInterval = setInterval(() => {
+      if (!active) return;
       if (lastPriceAtRef.current) {
         const elapsed = Math.floor((Date.now() - lastPriceAtRef.current.getTime()) / 1000);
         setSecondsSinceUpdate(elapsed);
 
         if (elapsed > 30) {
           setSource("stale");
-        } else if (elapsed > 5) {
-          setSource("live"); // Still live but slightly delayed
         }
       }
     }, 1000);
 
     return () => {
+      active = false;
       unsub();
       setConnected(false);
       setSource("fallback");
