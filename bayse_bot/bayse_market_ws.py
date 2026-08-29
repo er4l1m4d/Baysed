@@ -50,14 +50,18 @@ def resolve_outcome_from_id(
 ) -> Outcome:
     """Resolve a Bayse outcomeId to our canonical Outcome enum.
 
-    Uses outcome1_id/outcome2_id from the market if available,
-    otherwise falls back to position-based matching.
+    Uses outcome1_id/outcome2_id from the market if available.
+    Logs a warning on unknown mappings — should be investigated.
     """
+    if not outcome_id:
+        log.warning("Empty outcomeId received, defaulting to YES")
+        return Outcome.YES
     if outcome1_id and outcome_id == outcome1_id:
         return Outcome.YES
     if outcome2_id and outcome_id == outcome2_id:
         return Outcome.NO
-    log.debug("Unknown outcome_id=%s (o1=%s o2=%s), defaulting to YES", outcome_id, outcome1_id, outcome2_id)
+    # Unknown mapping — log at WARNING level so it's visible in production logs
+    log.warning("Unknown outcomeId=%s (o1=%s o2=%s) — defaulting to YES. Verify Bayse outcome mapping.", outcome_id, outcome1_id, outcome2_id)
     return Outcome.YES
 
 

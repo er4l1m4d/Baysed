@@ -30,15 +30,27 @@ class PostgresPredictionRepository(PredictionRepository):
         await self.session.flush()
         await self.session.commit()
 
-    async def get_prediction(self, market_id: str) -> dict[str, Any] | None:
+    async def get_latest_prediction(self, market_id: str) -> dict[str, Any] | None:
         from api.models import Prediction
         result = await self.session.execute(
-            select(Prediction).where(Prediction.market_id == market_id)
+            select(Prediction)
+            .where(Prediction.market_id == market_id)
+            .order_by(Prediction.recorded_at.desc())
+            .limit(1)
         )
         pred = result.scalar_one_or_none()
         if not pred:
             return None
         return self._to_dict(pred)
+
+    async def get_predictions_for_market(self, market_id: str) -> list[dict[str, Any]]:
+        from api.models import Prediction
+        result = await self.session.execute(
+            select(Prediction)
+            .where(Prediction.market_id == market_id)
+            .order_by(Prediction.recorded_at.asc())
+        )
+        return [self._to_dict(p) for p in result.scalars().all()]
 
     async def get_predictions(
         self, limit: int = 50, offset: int = 0, resolution: str | None = None
@@ -60,7 +72,25 @@ class PostgresPredictionRepository(PredictionRepository):
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
     ) -> None:
+        """Update the LATEST prediction snapshot for a market with resolution data.
+
+        Only the most recent snapshot gets resolution fields. Older snapshots
+        for the same market remain as historical records — their outcome is
+        derived by joining to MarketOutcome via (market_id, resolved_at).
+        """
         from api.models import Prediction
+
+        # Find the latest snapshot for this market
+        result = await self.session.execute(
+            select(Prediction)
+            .where(Prediction.market_id == market_id)
+            .order_by(Prediction.recorded_at.desc())
+            .limit(1)
+        )
+        latest = result.scalar_one_or_none()
+        if not latest:
+            return
+
         values: dict[str, Any] = {
             "outcome_resolution": outcome_resolution,
             "resolved_at": datetime.now(timezone.utc),
@@ -76,9 +106,10 @@ class PostgresPredictionRepository(PredictionRepository):
 
         await self.session.execute(
             update(Prediction)
-            .where(Prediction.market_id == market_id)
+            .where(Prediction.id == latest.id)
             .values(**values)
         )
+        await self.session.commit()
 
     async def get_pending_predictions(self) -> list[dict[str, Any]]:
         from api.models import Prediction
@@ -94,46 +125,35 @@ class PostgresPredictionRepository(PredictionRepository):
         correct = await self.count_correct()
         brier_mean = await self.get_brier_mean()
 
-        # Calibration curve: probabilistic evaluation (predicted_prob vs actual outcome)
-        # Each bucket: avg_predicted vs actual_rate (fraction of YES outcomes)
+        # Calibration curve: single grouped query for all 10 buckets
+        # Each row: bucket, count, avg_predicted, actual_yes_rate
+        result = await self.session.execute(text("""
+            SELECT
+                FLOOR(probability * 10) AS bucket_idx,
+                COUNT(*) AS cnt,
+                AVG(probability) AS avg_prob,
+                AVG(CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END) AS actual_yes_rate
+            FROM predictions
+            WHERE outcome_resolution != 'pending'
+              AND probability IS NOT NULL
+            GROUP BY FLOOR(probability * 10)
+            ORDER BY bucket_idx
+        """))
         curve = []
-        for bucket_idx in range(10):
+        for row in result.fetchall():
+            bucket_idx = int(row[0])
+            count = row[1] or 0
+            avg_prob = float(row[2]) if row[2] else 0
+            actual_rate = float(row[3]) if row[3] else 0
             low = bucket_idx * 0.1
             high = (bucket_idx + 1) * 0.1
-            result = await self.session.execute(
-                select(
-                    func.count(Prediction.id),
-                    func.avg(Prediction.probability),
-                ).where(
-                    Prediction.probability >= low,
-                    Prediction.probability < high,
-                    Prediction.outcome_resolution != "pending",
-                )
-            )
-            row = result.one()
-            count = row[0] or 0
-            if count > 0:
-                avg_prob = float(row[1]) if row[1] else 0
-
-                # Compute actual YES rate from outcome_resolution (not prediction_correct)
-                actual_result = await self.session.execute(
-                    select(func.count(Prediction.id)).where(
-                        Prediction.probability >= low,
-                        Prediction.probability < high,
-                        Prediction.outcome_resolution != "pending",
-                        Prediction.outcome_resolution == "yes_won",
-                    )
-                )
-                yes_count = actual_result.scalar() or 0
-                actual_rate = yes_count / count
-
-                curve.append({
-                    "bucket": f"{int(low*100)}-{int(high*100)}%",
-                    "count": count,
-                    "avg_predicted": round(avg_prob, 4),
-                    "actual_rate": round(actual_rate, 4),
-                    "gap": round(avg_prob - actual_rate, 4),
-                })
+            curve.append({
+                "bucket": f"{int(low*100)}-{int(high*100)}%",
+                "count": count,
+                "avg_predicted": round(avg_prob, 4),
+                "actual_rate": round(actual_rate, 4),
+                "gap": round(avg_prob - actual_rate, 4),
+            })
 
         return {
             "total": total,
@@ -307,6 +327,7 @@ class PostgresBotStatusRepository(BotStatusRepository):
 
     async def get_status(self) -> dict[str, Any]:
         from api.models import BotStatus
+        import json
         result = await self.session.execute(select(BotStatus).where(BotStatus.id == 1))
         status = result.scalar_one_or_none()
         if not status:
@@ -320,11 +341,34 @@ class PostgresBotStatusRepository(BotStatusRepository):
                 "uptime_seconds": 0,
                 "error_count": 0,
             }
+
+        # Derive liveness from heartbeat freshness (not boolean)
+        now = datetime.now(timezone.utc)
+        last_cycle = status.last_cycle_at
+        if last_cycle:
+            seconds_since = (now - last_cycle).total_seconds()
+            is_healthy = seconds_since < 45
+            is_stale = 15 <= seconds_since < 45
+        else:
+            seconds_since = 999
+            is_healthy = False
+            is_stale = False
+
+        # Parse feed health from last_error field
+        feed_health = {}
+        if status.last_error and status.last_error.startswith("{"):
+            try:
+                feed_health = json.loads(status.last_error)
+            except Exception:
+                feed_health = {}
+
         return {
-            "is_running": status.is_running,
+            "is_running": is_healthy,
+            "is_stale": is_stale,
+            "last_heartbeat_seconds_ago": round(seconds_since),
             "mode": status.mode,
             "strategy": status.strategy,
-            "last_cycle_at": status.last_cycle_at.isoformat() if status.last_cycle_at else None,
+            "last_cycle_at": last_cycle.isoformat() if last_cycle else None,
             "last_btc_price": float(status.last_btc_price) if status.last_btc_price else None,
             "last_momentum_pct": float(status.last_momentum_pct) if status.last_momentum_pct else None,
             "last_volatility": float(status.last_volatility) if status.last_volatility else None,
@@ -334,7 +378,8 @@ class PostgresBotStatusRepository(BotStatusRepository):
             "brier_mean": float(status.brier_mean) if status.brier_mean else None,
             "uptime_seconds": status.uptime_seconds,
             "error_count": status.error_count,
-            "last_error": status.last_error,
+            "last_error": status.last_error if not feed_health else None,
+            "feed_health": feed_health,
         }
 
     async def update_status(self, status: dict[str, Any]) -> None:
@@ -364,9 +409,32 @@ class PostgresBotStatusRepository(BotStatusRepository):
         })
 
     async def set_feed_status(self, feed_name: str, status: str, last_message_at: datetime | None = None) -> None:
-        # Feed status could be stored in a separate table or as JSON
-        # For now, we'll log it as an event
-        pass
+        """Store feed health as JSON in bot_status for terminal consumption."""
+        import json
+        from api.models import BotStatus
+        result = await self.session.execute(select(BotStatus).where(BotStatus.id == 1))
+        db_status = result.scalar_one_or_none()
+        if not db_status:
+            return
+
+        # Parse existing feed_health or create new
+        feed_health = {}
+        if db_status.last_error and db_status.last_error.startswith("{"):
+            try:
+                feed_health = json.loads(db_status.last_error)
+            except Exception:
+                feed_health = {}
+
+        feed_health[feed_name] = {
+            "status": status,
+            "last_message_at": last_message_at.isoformat() if last_message_at else None,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Store in last_error field (repurposed as feed_health when bot is running)
+        db_status.last_error = json.dumps(feed_health, default=str)
+        await self.session.flush()
+        await self.session.commit()
 
 
 class PostgresRiskRepository(RiskRepository):

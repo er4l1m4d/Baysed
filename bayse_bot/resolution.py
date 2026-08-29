@@ -5,11 +5,13 @@ a `resolvedOutcomeId` on each market. This module:
 1. Queries resolved events from Bayse
 2. Matches them against pending predictions using resolvedOutcomeId (canonical)
 3. Saves immutable MarketOutcome record (one per market)
-4. Updates prediction snapshots with the actual outcome
+4. Updates the LATEST prediction snapshot with the actual outcome
 5. Calculates Brier score as (predicted_prob - actual_outcome)^2
 
 The MarketOutcome is the canonical resolution record — once saved, it never
-changes. Predictions join to it via (market_id, resolved_at) for calibration.
+changes. Predictions reference it via market_id for calibration.
+
+Resolution is transactional: BEGIN, save outcome, update prediction, COMMIT.
 """
 from __future__ import annotations
 import logging
@@ -35,6 +37,11 @@ class ResolutionTracker:
 
         Returns count of newly resolved predictions.
         Uses resolvedOutcomeId as canonical resolution source.
+
+        For each resolved market:
+        - Save immutable MarketOutcome (idempotent, one per market)
+        - Update the LATEST prediction snapshot with resolution data
+        - Leave older snapshots as historical records
         """
         if not resolved_events:
             return 0
@@ -80,7 +87,7 @@ class ResolutionTracker:
             # Use resolvedOutcomeId as canonical resolution (not price heuristic)
             actual_won = outcome_from_bayse_resolved(resolved_outcome_id, outcome1_id, outcome2_id)
 
-            # Save immutable MarketOutcome (one per market, idempotent)
+            # Get close price for audit trail
             actual_price = None
             close_value = resolution.get("event_close_value") or resolution.get("market_close_value")
             if close_value:
@@ -89,6 +96,7 @@ class ResolutionTracker:
                 except Exception:
                     pass
 
+            # Save immutable MarketOutcome (idempotent)
             await self.outcome_repo.save_outcome({
                 "market_id": market_id,
                 "event_id": resolution.get("event_id", ""),
@@ -100,7 +108,6 @@ class ResolutionTracker:
             })
 
             # Calculate Brier score: (predicted_prob - actual_outcome)^2
-            # actual_outcome = 1.0 if YES won, 0.0 if NO won
             probability = Decimal(str(record.get("probability", 0.5)))
             actual_binary = Decimal("1") if actual_won == PredictionOutcome.YES_WON.value else Decimal("0")
             brier_score = (probability - actual_binary) ** 2
@@ -109,7 +116,7 @@ class ResolutionTracker:
             predicted = record.get("predicted_outcome", "")
             was_correct = predicted == actual_won
 
-            # Update prediction snapshot with resolution
+            # Update the LATEST prediction snapshot with resolution
             await self.prediction_repo.update_resolution(
                 market_id=market_id,
                 outcome_resolution=actual_won,

@@ -23,8 +23,13 @@ class PredictionRepository(ABC):
         ...
 
     @abstractmethod
-    async def get_prediction(self, market_id: str) -> dict[str, Any] | None:
-        """Get a prediction by market ID."""
+    async def get_latest_prediction(self, market_id: str) -> dict[str, Any] | None:
+        """Get the most recent prediction snapshot for a market."""
+        ...
+
+    @abstractmethod
+    async def get_predictions_for_market(self, market_id: str) -> list[dict[str, Any]]:
+        """Get all prediction snapshots for a market, ordered by recorded_at."""
         ...
 
     @abstractmethod
