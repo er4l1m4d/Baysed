@@ -109,6 +109,10 @@ class DistanceToStrikeModel(Strategy):
         reasons = []
         contract = x.contract
 
+        if not x.btc.complete:
+            reasons.append("btc_data_incomplete_or_stale")
+            return Decision(self.name, None, None, None, None, Decimal("0"), False, tuple(reasons))
+
         if not contract:
             reasons.append("no_contract_state")
             return Decision(self.name, None, None, None, None, Decimal("0"), False, tuple(reasons))

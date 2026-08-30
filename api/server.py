@@ -234,7 +234,7 @@ async def debug():
 
     return {
         "btc_price": float(shared_state.btc_price) if shared_state.btc_price else None,
-        "btc_connected": shared_state.last_tick_at is not None if hasattr(shared_state, 'last_tick_at') else False,
+        "btc_connected": shared_state.last_btc_update is not None if hasattr(shared_state, 'last_btc_update') else False,
         "bot_started": bot_diagnostics["started"],
         "bot_error": bot_diagnostics["error"],
         "init_error": bot_diagnostics["init_error"],
