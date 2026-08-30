@@ -81,6 +81,7 @@ export interface LiveMarketState {
   model_probability: number | null;
   model_predicted_outcome: string | null;
   edge: number | null;
+  approved: boolean;
   is_active: boolean;
 }
 

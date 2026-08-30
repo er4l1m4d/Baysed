@@ -197,8 +197,16 @@ function LiveMarketCard() {
         </div>
         <div>
           <div className="text-xs text-gray-500">Signal</div>
-          <div className={`text-lg font-bold ${liveMarket.model_predicted_outcome === "YES" ? "text-emerald-400" : "text-red-400"}`}>
-            {liveMarket.model_predicted_outcome || "--"}
+          <div className={`text-lg font-bold ${
+            !liveMarket.model_predicted_outcome ? "text-gray-500" :
+            liveMarket.approved ? (
+              liveMarket.model_predicted_outcome === "YES" ? "text-emerald-400" : "text-red-400"
+            ) : "text-yellow-400"
+          }`}>
+            {!liveMarket.model_predicted_outcome ? "--" :
+             liveMarket.approved ? (
+              liveMarket.model_predicted_outcome === "YES" ? "Up" : "Down"
+            ) : "Skip"}
           </div>
         </div>
       </div>

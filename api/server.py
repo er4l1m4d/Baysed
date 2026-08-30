@@ -121,6 +121,7 @@ class LiveMarketResponse(BaseModel):
     model_probability: float | None = None
     model_predicted_outcome: str | None = None
     edge: float | None = None
+    approved: bool = False
     is_active: bool = False
 
 
@@ -258,6 +259,7 @@ async def get_live_state(db: AsyncSession = Depends(get_db)):
         model_probability=float(latest.probability) if latest.probability else None,
         model_predicted_outcome=latest.predicted_outcome or None,
         edge=float(latest.edge) if latest.edge else None,
+        approved=latest.approved or False,
         is_active=seconds_remaining is not None and seconds_remaining > 0,
     )
 
