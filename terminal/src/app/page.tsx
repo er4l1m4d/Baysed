@@ -22,6 +22,12 @@ function PriceCard() {
       color: "bg-blue-900 text-blue-400",
       dotColor: "bg-blue-400",
     },
+    fallback: {
+      label: "CONNECTING",
+      sublabel: "Waiting for data",
+      color: "bg-yellow-900 text-yellow-400",
+      dotColor: "bg-yellow-400 animate-pulse",
+    },
   };
 
   const config = sourceConfig[source];

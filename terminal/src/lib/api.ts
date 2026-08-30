@@ -1,9 +1,9 @@
 /**
  * API client for the Bayse Bot backend.
- * Connects to the FastAPI server on Render.
+ * Uses Vercel rewrite proxy — all requests go through same origin.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export interface StatusResponse {
   is_running: boolean;
@@ -156,7 +156,9 @@ export function connectWebSocket(
   onPrediction?: (prediction: Prediction) => void,
   onActiveMarket?: (market: LiveMarketState) => void
 ): () => void {
-  const wsUrl = API_BASE.replace("http", "ws") + "/ws";
+  // Use same origin — Vercel proxy routes /ws to Render
+  const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let shouldReconnect = true;

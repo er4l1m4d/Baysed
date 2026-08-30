@@ -172,44 +172,65 @@ export function useLiveMarketState() {
   return { liveMarket, loading };
 }
 
-type PriceSource = "live" | "polling";
+type PriceSource = "live" | "polling" | "fallback";
 
 export function useLivePrice() {
   const [price, setPrice] = useState<number | null>(null);
   const [momentum, setMomentum] = useState(0);
   const [volatility, setVolatility] = useState(0);
   const [connected, setConnected] = useState(false);
-  const [source, setSource] = useState<PriceSource>("polling");
+  const [source, setSource] = useState<PriceSource>("fallback");
   const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
   const lastPriceAtRef = useRef<Date | null>(null);
+  const wsReceivedTick = useRef(false);
 
   useEffect(() => {
     let active = true;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-    // Primary: REST polling (works reliably on Render free tier + Vercel)
-    async function pollPrice() {
+    // Try WebSocket first (Vercel proxy makes this work cross-origin)
+    const unsub = connectWebSocket((p, m, v) => {
       if (!active) return;
-      try {
-        const status = await getStatus();
-        if (active && status.last_btc_price) {
-          setPrice(status.last_btc_price);
-          setMomentum(status.last_momentum_pct || 0);
-          setVolatility(status.last_volatility || 0);
-          setConnected(true);
-          setSource("polling");
-          const now = new Date();
-          lastPriceAtRef.current = now;
-          setLastUpdateAt(now);
-          setSecondsSinceUpdate(0);
-        }
-      } catch {
-        // ignore
-      }
-    }
+      setPrice(p);
+      setMomentum(m);
+      setVolatility(v);
+      setConnected(true);
+      setSource("live");
+      wsReceivedTick.current = true;
+      const now = new Date();
+      lastPriceAtRef.current = now;
+      setLastUpdateAt(now);
+      setSecondsSinceUpdate(0);
+    });
 
-    pollPrice();
-    const pollInterval = setInterval(pollPrice, 5000);
+    // Fallback to REST polling if WS doesn't produce a tick in 8 seconds
+    const wsFallbackTimer = setTimeout(() => {
+      if (!active || wsReceivedTick.current) return;
+
+      async function pollPrice() {
+        if (!active) return;
+        try {
+          const status = await getStatus();
+          if (active && status.last_btc_price) {
+            setPrice(status.last_btc_price);
+            setMomentum(status.last_momentum_pct || 0);
+            setVolatility(status.last_volatility || 0);
+            setConnected(true);
+            setSource("polling");
+            const now = new Date();
+            lastPriceAtRef.current = now;
+            setLastUpdateAt(now);
+            setSecondsSinceUpdate(0);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      pollPrice();
+      pollInterval = setInterval(pollPrice, 5000);
+    }, 8000);
 
     // Check staleness every second
     const stalenessInterval = setInterval(() => {
@@ -220,32 +241,16 @@ export function useLivePrice() {
       }
     }, 1000);
 
-    // Try WebSocket as enhancement (if it connects, upgrade to live)
-    let unsub: (() => void) | null = null;
-    try {
-      unsub = connectWebSocket((p, m, v) => {
-        if (!active) return;
-        setPrice(p);
-        setMomentum(m);
-        setVolatility(v);
-        setConnected(true);
-        setSource("live");
-        const now = new Date();
-        lastPriceAtRef.current = now;
-        setLastUpdateAt(now);
-        setSecondsSinceUpdate(0);
-      });
-    } catch {
-      // WebSocket not available, REST polling is fine
-    }
-
     return () => {
       active = false;
-      clearInterval(pollInterval);
-      clearInterval(stalenessInterval);
-      if (unsub) unsub();
+      clearTimeout(wsFallbackTimer);
+      if (pollInterval) clearInterval(pollInterval);
+      unsub();
       setConnected(false);
+      setSource("fallback");
       lastPriceAtRef.current = null;
+      wsReceivedTick.current = false;
+      clearInterval(stalenessInterval);
     };
   }, []);
 

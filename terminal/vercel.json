@@ -2,5 +2,15 @@
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "framework": "nextjs",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "rewrites": [
+    {
+      "source": "/ws",
+      "destination": "https://baysed.onrender.com/ws"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://baysed.onrender.com/:path*"
+    }
+  ]
 }
