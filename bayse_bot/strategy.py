@@ -151,8 +151,9 @@ class MeanReversionInversion(MomentumContinuation):
     name="mean_reversion_inversion"
     def evaluate(self,x,s):
         base=super().evaluate(x,s); outcome=Outcome.NO if base.outcome is Outcome.YES else Outcome.YES
-        price=x.yes_ask if outcome is Outcome.YES else x.no_ask
+        # Invert probability: if base says P(YES)=0.7, inverted says P(YES)=0.3
         probability=(1-base.probability) if base.probability is not None else None
+        price=x.yes_ask if outcome is Outcome.YES else x.no_ask
         edge=(probability-price) if probability is not None else None
         reasons=[r for r in base.reasons if not r.startswith("model_edge")]
         if edge is None or edge < s.min_model_gap: reasons.append("model_edge_below_minimum")

@@ -118,6 +118,19 @@ class PostgresPredictionRepository(PredictionRepository):
         )
         return [self._to_dict(p) for p in result.scalars().all()]
 
+    async def get_pending_predictions_for_markets(self, market_ids: list[str]) -> list[dict[str, Any]]:
+        """Get pending predictions only for specific markets (scoped resolution)."""
+        if not market_ids:
+            return []
+        from api.models import Prediction
+        result = await self.session.execute(
+            select(Prediction).where(
+                Prediction.outcome_resolution == "pending",
+                Prediction.market_id.in_(market_ids),
+            )
+        )
+        return [self._to_dict(p) for p in result.scalars().all()]
+
     async def get_calibration_stats(self) -> dict[str, Any]:
         from api.models import Prediction
         total = await self.count_predictions()
@@ -354,13 +367,8 @@ class PostgresBotStatusRepository(BotStatusRepository):
             is_healthy = False
             is_stale = False
 
-        # Parse feed health from last_error field
-        feed_health = {}
-        if status.last_error and status.last_error.startswith("{"):
-            try:
-                feed_health = json.loads(status.last_error)
-            except Exception:
-                feed_health = {}
+        # Use dedicated feed_health column
+        feed_health = status.feed_health or {}
 
         return {
             "is_running": is_healthy,
@@ -378,7 +386,7 @@ class PostgresBotStatusRepository(BotStatusRepository):
             "brier_mean": float(status.brier_mean) if status.brier_mean else None,
             "uptime_seconds": status.uptime_seconds,
             "error_count": status.error_count,
-            "last_error": status.last_error if not feed_health else None,
+            "last_error": status.last_error,
             "feed_health": feed_health,
         }
 
@@ -409,7 +417,7 @@ class PostgresBotStatusRepository(BotStatusRepository):
         })
 
     async def set_feed_status(self, feed_name: str, status: str, last_message_at: datetime | None = None) -> None:
-        """Store feed health as JSON in bot_status for terminal consumption."""
+        """Store feed health in dedicated feed_health JSON column."""
         import json
         from api.models import BotStatus
         result = await self.session.execute(select(BotStatus).where(BotStatus.id == 1))
@@ -417,13 +425,8 @@ class PostgresBotStatusRepository(BotStatusRepository):
         if not db_status:
             return
 
-        # Parse existing feed_health or create new
-        feed_health = {}
-        if db_status.last_error and db_status.last_error.startswith("{"):
-            try:
-                feed_health = json.loads(db_status.last_error)
-            except Exception:
-                feed_health = {}
+        # Read existing feed_health from dedicated column
+        feed_health = db_status.feed_health or {}
 
         feed_health[feed_name] = {
             "status": status,
@@ -431,8 +434,7 @@ class PostgresBotStatusRepository(BotStatusRepository):
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Store in last_error field (repurposed as feed_health when bot is running)
-        db_status.last_error = json.dumps(feed_health, default=str)
+        db_status.feed_health = feed_health
         await self.session.flush()
         await self.session.commit()
 

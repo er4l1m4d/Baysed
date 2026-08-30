@@ -47,22 +47,21 @@ def resolve_outcome_from_id(
     outcome_id: str,
     outcome1_id: str | None = None,
     outcome2_id: str | None = None,
-) -> Outcome:
+) -> Outcome | None:
     """Resolve a Bayse outcomeId to our canonical Outcome enum.
 
-    Uses outcome1_id/outcome2_id from the market if available.
-    Logs a warning on unknown mappings — should be investigated.
+    Returns None for unknown/empty IDs (fail-closed).
+    Unknown mappings are rejected — a wrong book is worse than no book.
     """
     if not outcome_id:
-        log.warning("Empty outcomeId received, defaulting to YES")
-        return Outcome.YES
+        log.warning("Empty outcomeId received — rejecting book update")
+        return None
     if outcome1_id and outcome_id == outcome1_id:
         return Outcome.YES
     if outcome2_id and outcome_id == outcome2_id:
         return Outcome.NO
-    # Unknown mapping — log at WARNING level so it's visible in production logs
-    log.warning("Unknown outcomeId=%s (o1=%s o2=%s) — defaulting to YES. Verify Bayse outcome mapping.", outcome_id, outcome1_id, outcome2_id)
-    return Outcome.YES
+    log.warning("Unknown outcomeId=%s (o1=%s o2=%s) — rejecting book update", outcome_id, outcome1_id, outcome2_id)
+    return None
 
 
 class MarketStateStore:
@@ -71,31 +70,64 @@ class MarketStateStore:
     The WS feed writes here. The signal engine and terminal/API read from here.
     This eliminates duplicated interpretations of the same market data.
 
-    Store is updated atomically (attribute assignment) so no locking is needed
-    for single-reader patterns.
+    State is replaced atomically (immutable snapshots) so no locking is needed
+    under the single-writer (WS task) / multiple-reader pattern.
     """
 
-    def __init__(self) -> None:
-        # market_id -> {outcome: OrderBook, last_update: datetime}
-        self.books: dict[str, dict[str, OrderBook]] = {}
+    def __init__(self, stale_after_seconds: int = 30) -> None:
+        self.stale_after_seconds = stale_after_seconds
+        # market_id -> {outcome: OrderBook}
+        self._books: dict[str, dict[Outcome, OrderBook]] = {}
+        # market_id -> {outcome: last_update datetime}
+        self._book_timestamps: dict[str, dict[Outcome, datetime]] = {}
         # event_id -> {market_id -> {price, volume, last_trade_at}}
         self.prices: dict[str, dict[str, dict]] = {}
         # event_id -> list of trades
         self.trades: dict[str, list[dict]] = {}
-        # event_id -> {market_id -> OrderBook}
-        self._market_events: dict[str, set[str]] = {}  # event_id -> set of market_ids
+        # event_id -> set of market_ids
+        self._market_events: dict[str, set[str]] = {}
+        # market_id -> (outcome1_id, outcome2_id) for WS resolution
+        self._outcome_ids: dict[str, tuple[str, str]] = {}
 
     def update_book(self, market_id: str, book: OrderBook) -> None:
-        """Update order book for a market from WS."""
-        self.books.setdefault(market_id, {})[book.outcome] = book
+        """Update order book for a market from WS (immutable snapshot replacement)."""
+        # Replace snapshot atomically (no mutation of nested dict)
+        existing = self._books.get(market_id, {})
+        self._books[market_id] = {**existing, book.outcome: book}
+        self._book_timestamps.setdefault(market_id, {})[book.outcome] = datetime.now(timezone.utc)
 
-    def get_books(self, market_id: str) -> dict[str, OrderBook]:
+    def get_books(self, market_id: str) -> dict[Outcome, OrderBook]:
         """Get current books for a market (both outcomes)."""
-        return self.books.get(market_id, {})
+        return self._books.get(market_id, {})
+
+    def get_book(self, market_id: str, outcome: Outcome) -> OrderBook | None:
+        """Get book for a specific outcome."""
+        return self._books.get(market_id, {}).get(outcome)
+
+    def is_book_fresh(self, market_id: str, outcome: Outcome) -> bool:
+        """Check if a book is fresh (updated within stale_after_seconds)."""
+        ts = self._book_timestamps.get(market_id, {}).get(outcome)
+        if not ts:
+            return False
+        return (datetime.now(timezone.utc) - ts).total_seconds() < self.stale_after_seconds
+
+    def book_age_ms(self, market_id: str, outcome: Outcome) -> float | None:
+        """Get age of a book in milliseconds. Returns None if no book exists."""
+        ts = self._book_timestamps.get(market_id, {}).get(outcome)
+        if not ts:
+            return None
+        return (datetime.now(timezone.utc) - ts).total_seconds() * 1000
+
+    def has_fresh_books(self, market_id: str) -> bool:
+        """Check if both YES and NO books exist and are fresh."""
+        return (
+            self.is_book_fresh(market_id, Outcome.YES)
+            and self.is_book_fresh(market_id, Outcome.NO)
+        )
 
     def get_best_prices(self, market_id: str) -> tuple[Decimal | None, Decimal | None]:
         """Get best (yes_ask, no_ask) for a market."""
-        books = self.books.get(market_id, {})
+        books = self._books.get(market_id, {})
         yes_book = books.get(Outcome.YES)
         no_book = books.get(Outcome.NO)
         return (
@@ -125,6 +157,14 @@ class MarketStateStore:
         """Register a market for subscription tracking."""
         self._market_events.setdefault(event_id, set()).add(market_id)
 
+    def store_outcome_ids(self, market_id: str, outcome1_id: str, outcome2_id: str) -> None:
+        """Store outcome ID mapping for WS resolution."""
+        self._outcome_ids[market_id] = (outcome1_id, outcome2_id)
+
+    def get_outcome_ids(self, market_id: str) -> tuple[str | None, str | None]:
+        """Get outcome IDs for a market. Returns (o1_id, o2_id) or (None, None)."""
+        return self._outcome_ids.get(market_id, (None, None))
+
     def get_market_ids_for_event(self, event_id: str) -> list[str]:
         """Get all market IDs for an event."""
         return list(self._market_events.get(event_id, set()))
@@ -147,6 +187,7 @@ class BayseMarketFeed:
         self.subscribed_events: set[str] = set()
         self.subscribed_markets: set[str] = set()
         self.last_message_at: datetime | None = None
+        self.mapping_errors: int = 0
 
     async def run(
         self,
@@ -193,8 +234,13 @@ class BayseMarketFeed:
                                 ob_data = data.get("orderbook", data)
                                 market_id = ob_data.get("marketId", "")
                                 outcome_id = ob_data.get("outcomeId", "")
-                                # Resolve outcome from incoming outcomeId, not hardcoded
-                                outcome = resolve_outcome_from_id(outcome_id)
+                                # Look up outcome mapping from stored IDs
+                                o1_id, o2_id = self.store.get_outcome_ids(market_id)
+                                outcome = resolve_outcome_from_id(outcome_id, o1_id, o2_id)
+                                if outcome is None:
+                                    # Unknown mapping — reject book, don't pollute store
+                                    self.mapping_errors += 1
+                                    continue
                                 book = parse_ws_book(data, market_id, outcome)
                                 # Update canonical store
                                 self.store.update_book(market_id, book)

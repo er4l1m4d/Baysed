@@ -103,7 +103,8 @@ class BotStatus(Base):
     brier_mean = Column(Numeric(10, 6))
     uptime_seconds = Column(Integer, default=0)
     error_count = Column(Integer, default=0)
-    last_error = Column(Text)
+    last_error = Column(Text)  # Actual error messages (string)
+    feed_health = Column(JSON)  # Feed health status (separate from errors)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 

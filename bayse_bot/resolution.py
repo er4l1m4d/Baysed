@@ -46,10 +46,6 @@ class ResolutionTracker:
         if not resolved_events:
             return 0
 
-        pending = await self.prediction_repo.get_pending_predictions()
-        if not pending:
-            return 0
-
         # Build lookup: market_id -> resolved event data
         market_resolution: dict[str, dict[str, Any]] = {}
         for event in resolved_events:
@@ -68,6 +64,14 @@ class ResolutionTracker:
                         "market_close_value": market.get("marketCloseValue") or market.get("market_close_value"),
                         "status": market.get("status", "resolved"),
                     }
+
+        if not market_resolution:
+            return 0
+
+        # Only fetch pending predictions for resolved markets (not all pending)
+        pending = await self.prediction_repo.get_pending_predictions_for_markets(
+            list(market_resolution.keys())
+        )
 
         # Match against pending predictions
         resolved_count = 0

@@ -58,6 +58,11 @@ class PredictionRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_pending_predictions_for_markets(self, market_ids: list[str]) -> list[dict[str, Any]]:
+        """Get pending predictions only for specific markets (scoped resolution)."""
+        ...
+
+    @abstractmethod
     async def get_calibration_stats(self) -> dict[str, Any]:
         """Get calibration statistics (total, resolved, correct, brier_mean, curve)."""
         ...

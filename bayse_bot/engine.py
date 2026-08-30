@@ -98,6 +98,11 @@ class Bot:
         for event in events:
             for raw_market in event.get("markets", []):
                 market = adapt_market(event, raw_market)
+                # Store outcome IDs for WS resolution
+                if self.market_feed and market.outcome1_id and market.outcome2_id:
+                    self.market_feed.store.store_outcome_ids(
+                        market.market_id, market.outcome1_id, market.outcome2_id
+                    )
                 reasons = validate_market(market, self.s)
                 if reasons:
                     await self.repos.event_log.log_event(
@@ -224,9 +229,13 @@ class Bot:
             log.warning("resolution_check_failed: %s: %s", type(exc).__name__, exc)
 
     async def evaluate_market(self, market: Market) -> None:
-        """Evaluate a single market for trading opportunity."""
+        """Evaluate a single market for trading opportunity.
+
+        Book source priority:
+        1. MarketStateStore (WS) — fresh books from live feed
+        2. REST API — fallback when WS is stale or missing
+        """
         try:
-            # Fetch both outcome books in one call using outcome IDs
             o1_id = market.outcome1_id
             o2_id = market.outcome2_id
             if not o1_id or not o2_id:
@@ -237,26 +246,43 @@ class Bot:
                 )
                 return
 
-            books_raw = await self.client.book([o1_id, o2_id])
-
-            # Parse books if available; otherwise construct minimal stubs from market metadata
-            if isinstance(books_raw, list) and len(books_raw) >= 2:
-                yes = parse_book(books_raw[0], market.market_id, Outcome.YES)
-                no = parse_book(books_raw[1], market.market_id, Outcome.NO)
+            source = "ws"
+            # Try WS store first — check freshness
+            store = self.market_feed.store if self.market_feed else None
+            if store and store.has_fresh_books(market.market_id):
+                books = store.get_books(market.market_id)
+                yes = books.get(Outcome.YES)
+                no = books.get(Outcome.NO)
+                if yes and no:
+                    log.info("  books from WS store (age_yes=%.0fms age_no=%.0fms)",
+                        store.book_age_ms(market.market_id, Outcome.YES) or 0,
+                        store.book_age_ms(market.market_id, Outcome.NO) or 0)
+                else:
+                    source = "rest"
             else:
-                # Fallback: use market last-trade prices from event payload
-                raw_market = market.raw.get("market", {}) if market.raw else {}
-                y_price = _dec(raw_market.get("outcome1Price"), "0.5")
-                n_price = _dec(raw_market.get("outcome2Price"), "0.5")
-                now = datetime.now(timezone.utc)
-                spread = Decimal("0.01")
-                yes = OrderBook(market.market_id, Outcome.YES,
-                    (BookLevel(y_price - spread, Decimal("1")),),
-                    (BookLevel(y_price + spread, Decimal("1")),), now)
-                no = OrderBook(market.market_id, Outcome.NO,
-                    (BookLevel(n_price - spread, Decimal("1")),),
-                    (BookLevel(n_price + spread, Decimal("1")),), now)
-                log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
+                source = "rest"
+
+            # Fallback to REST if WS books unavailable
+            if source == "rest":
+                books_raw = await self.client.book([o1_id, o2_id])
+                if isinstance(books_raw, list) and len(books_raw) >= 2:
+                    yes = parse_book(books_raw[0], market.market_id, Outcome.YES)
+                    no = parse_book(books_raw[1], market.market_id, Outcome.NO)
+                    log.info("  books from REST API")
+                else:
+                    # Use market last-trade prices as final fallback
+                    raw_market = market.raw.get("market", {}) if market.raw else {}
+                    y_price = _dec(raw_market.get("outcome1Price"), "0.5")
+                    n_price = _dec(raw_market.get("outcome2Price"), "0.5")
+                    now = datetime.now(timezone.utc)
+                    spread = Decimal("0.01")
+                    yes = OrderBook(market.market_id, Outcome.YES,
+                        (BookLevel(y_price - spread, Decimal("1")),),
+                        (BookLevel(y_price + spread, Decimal("1")),), now)
+                    no = OrderBook(market.market_id, Outcome.NO,
+                        (BookLevel(n_price - spread, Decimal("1")),),
+                        (BookLevel(n_price + spread, Decimal("1")),), now)
+                    log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
 
             # Build contract state
             spread = yes.spread

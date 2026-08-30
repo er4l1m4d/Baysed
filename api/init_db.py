@@ -35,8 +35,8 @@ def get_database_url() -> tuple[str, bool]:
     return clean_url, needs_ssl
 
 
-# Columns to add if missing (column_name, column_definition)
-COLUMNS_TO_ADD = [
+# Columns to add if missing (table, column_name, column_definition)
+PREDICTION_COLUMNS = [
     ("observed_at", "TIMESTAMP WITH TIME ZONE"),
     ("decided_at", "TIMESTAMP WITH TIME ZONE"),
     ("opened_at", "TIMESTAMP WITH TIME ZONE"),
@@ -47,18 +47,29 @@ COLUMNS_TO_ADD = [
     ("resolved_outcome_id", "VARCHAR(255)"),
 ]
 
+BOT_STATUS_COLUMNS = [
+    ("feed_health", "JSONB"),
+]
+
 
 async def ensure_columns(engine):
     """Add missing columns to existing tables (safe — only adds if not exists)."""
     async with engine.begin() as conn:
-        for col_name, col_def in COLUMNS_TO_ADD:
+        for col_name, col_def in PREDICTION_COLUMNS:
             try:
                 await conn.execute(text(
                     f"ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
                 ))
             except Exception as e:
-                # SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS
-                # but it's fine — create_all handles SQLite
+                if "sqlite" not in str(type(conn)):
+                    log.warning("could not add column %s: %s", col_name, e)
+
+        for col_name, col_def in BOT_STATUS_COLUMNS:
+            try:
+                await conn.execute(text(
+                    f"ALTER TABLE bot_status ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
+                ))
+            except Exception as e:
                 if "sqlite" not in str(type(conn)):
                     log.warning("could not add column %s: %s", col_name, e)
 

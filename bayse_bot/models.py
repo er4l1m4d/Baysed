@@ -142,9 +142,15 @@ class BTCFeatures:
 
 @dataclass(frozen=True)
 class Decision:
+    """Strategy decision.
+
+    probability: always P(YES) — the probability of the YES outcome.
+    The predicted outcome is derived from probability (>0.5 = YES, <=0.5 = NO).
+    For inverted strategies, probability = 1 - base_probability.
+    """
     strategy: str
     outcome: Outcome | None
-    probability: Decimal | None
+    probability: Decimal | None  # Always P(YES), regardless of predicted outcome
     edge: Decimal | None
     strength: Decimal
     approved: bool

@@ -28,15 +28,17 @@ class TestOutcomeIdentity:
     def test_outcome2_maps_to_no(self):
         assert resolve_outcome_from_id("o2_xyz", "o1_abc", "o2_xyz") is Outcome.NO
 
-    def test_empty_outcome_id_logs_warning(self, caplog):
+    def test_empty_outcome_id_returns_none(self, caplog):
         with caplog.at_level("WARNING"):
             result = resolve_outcome_from_id("", "o1_abc", "o2_xyz")
-        assert result is Outcome.YES  # fallback
+        assert result is None  # fail-closed: reject unknown
         assert "Empty outcomeId" in caplog.text
 
-    def test_unknown_outcome_id_logs_warning(self):
-        result = resolve_outcome_from_id("unknown_id", "o1_abc", "o2_xyz")
-        assert result is Outcome.YES  # fallback, but logged
+    def test_unknown_outcome_id_returns_none(self, caplog):
+        with caplog.at_level("WARNING"):
+            result = resolve_outcome_from_id("unknown_id", "o1_abc", "o2_xyz")
+        assert result is None  # fail-closed: reject unknown
+        assert "Unknown outcomeId" in caplog.text
 
     def test_swapped_outcome_ids_resolve_correctly(self):
         """If outcome1_id and outcome2_id are swapped, mapping should still work."""
