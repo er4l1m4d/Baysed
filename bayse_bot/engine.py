@@ -188,6 +188,13 @@ class Bot:
                 except asyncio.TimeoutError:
                     log.warning("scan_once timed out after 30s")
 
+                # Increment cycle counter for diagnostics
+                try:
+                    from api.shared import bot_diagnostics
+                    bot_diagnostics["cycles"] += 1
+                except Exception:
+                    pass
+
             except Exception as exc:
                 log.warning("scan_failure: %s: %s", type(exc).__name__, exc)
                 try:
@@ -213,8 +220,10 @@ class Bot:
         try:
             resolved_events = await self.client.resolved_events(self.s.series_slug)
             if not resolved_events:
+                log.debug("no resolved events from Bayse API")
                 return
 
+            log.info("resolution check: %d resolved events from Bayse", len(resolved_events))
             resolved_count = await self.resolver.resolve_from_events(resolved_events)
             if resolved_count > 0:
                 log.info("resolved %d predictions", resolved_count)
@@ -224,6 +233,8 @@ class Bot:
                 if stats["resolved"] > 0:
                     log.info("calibration: %d/%d resolved brier_mean=%s",
                         stats["resolved"], stats["total"], stats["brier_mean"])
+            else:
+                log.info("resolution: %d resolved events but 0 predictions matched", len(resolved_events))
 
         except Exception as exc:
             log.warning("resolution_check_failed: %s: %s", type(exc).__name__, exc)

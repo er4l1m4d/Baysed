@@ -203,12 +203,19 @@ async def debug():
     # Test Bayse API connectivity
     bayse_ok = False
     bayse_events = 0
+    resolved_events = 0
+    resolved_markets = 0
     try:
         from bayse_bot.bayse import BayseClient
         async with BayseClient("https://relay.bayse.markets") as client:
             events = await client.events_by_series("crypto-btc-15min")
             bayse_events = len(events)
             bayse_ok = True
+            # Also check resolved events
+            resolved = await client.resolved_events("crypto-btc-15min")
+            resolved_events = len(resolved)
+            for evt in resolved:
+                resolved_markets += len(evt.get("markets", []))
     except Exception as e:
         bayse_ok = False
     return {
@@ -220,6 +227,8 @@ async def debug():
         "cycles": bot_diagnostics["cycles"],
         "bayse_api_ok": bayse_ok,
         "bayse_events": bayse_events,
+        "resolved_events": resolved_events,
+        "resolved_markets": resolved_markets,
     }
 
 

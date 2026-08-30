@@ -66,12 +66,15 @@ class ResolutionTracker:
                     }
 
         if not market_resolution:
+            log.info("resolution: no markets with resolvedOutcomeId in resolved events")
             return 0
 
         # Only fetch pending predictions for resolved markets (not all pending)
         pending = await self.prediction_repo.get_pending_predictions_for_markets(
             list(market_resolution.keys())
         )
+        log.info("resolution: %d resolved markets, %d matching pending predictions",
+            len(market_resolution), len(pending))
 
         # Match against pending predictions
         resolved_count = 0
