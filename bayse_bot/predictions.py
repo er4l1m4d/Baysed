@@ -77,6 +77,7 @@ class PredictionRecord:
     predicted_outcome: str = ""  # "YES" or "NO"
     edge: Decimal | None = None
     edge_fee: Decimal | None = None  # Fee-adjusted edge
+    bayse_implied: Decimal | None = None  # Bayse market implied probability of predicted outcome
     signal_strength: Decimal = Decimal("0")
     approved: bool = False
     reasons: tuple[str, ...] = ()

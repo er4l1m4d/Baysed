@@ -358,6 +358,7 @@ class Bot:
                     predicted_outcome=decision.outcome.value if decision.outcome else "",
                     edge=decision.edge,
                     edge_fee=decision.edge_fee,
+                    bayse_implied=yes.best_ask if decision.outcome and decision.outcome.value == "YES" else no.best_ask,
                     signal_strength=decision.strength,
                     approved=decision.approved,
                     reasons=tuple(reasons),

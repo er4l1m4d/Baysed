@@ -52,21 +52,15 @@ function CalibrationChart({ curve }: { curve: { bucket: string; count: number; a
 }
 
 function MetricsGrid() {
-  const { status } = useBotStatus();
   const { calibration } = useCalibration();
 
-  const accuracy = status?.accuracy ? `${(status.accuracy * 100).toFixed(1)}%` : "--";
-  const brier = status?.brier_mean ? status.brier_mean.toFixed(4) : "--";
-  const total = status?.total_predictions || 0;
-  const resolved = status?.total_resolved || 0;
-
   const metrics = [
-    { label: "Brier Score", value: brier, status: status?.brier_mean && status.brier_mean < 0.25 ? "good" : "neutral", desc: "Lower is better (0 = perfect)" },
-    { label: "Accuracy", value: accuracy, status: status?.accuracy && status.accuracy > 0.5 ? "good" : "neutral", desc: "Fraction of correct predictions" },
-    { label: "Total Predictions", value: String(total), status: "neutral", desc: "All time" },
-    { label: "Resolved", value: String(resolved), status: "neutral", desc: `${total > 0 ? ((resolved / total) * 100).toFixed(0) : 0}% resolution rate` },
-    { label: "Avg Edge", value: "--", status: "neutral", desc: "Model edge vs market" },
-    { label: "Calibration Bias", value: calibration?.calibration_curve?.length ? "Measuring..." : "No data", status: "neutral", desc: "Will improve with more data" },
+    { label: "Model Brier", value: calibration?.brier_model ? calibration.brier_model.toFixed(4) : "--", status: "neutral", desc: "Baysed model (lower = better)" },
+    { label: "Market Brier", value: calibration?.brier_market ? calibration.brier_market.toFixed(4) : "--", status: "neutral", desc: "Bayse implied probability" },
+    { label: "50% Baseline", value: calibration?.brier_baseline ? calibration.brier_baseline.toFixed(4) : "--", status: "neutral", desc: "Always-predict-50% baseline" },
+    { label: "Edge vs Market", value: calibration?.edge_vs_market != null ? `${calibration.edge_vs_market > 0 ? "+" : ""}${calibration.edge_vs_market.toFixed(4)}` : "--", status: calibration?.edge_vs_market && calibration.edge_vs_market > 0 ? "good" : "bad", desc: "Positive = model beats market" },
+    { label: "Resolved", value: String(calibration?.resolved || 0), status: "neutral", desc: `${calibration?.total || 0} total predictions` },
+    { label: "Signal Coverage", value: calibration?.signal_coverage != null ? `${(calibration.signal_coverage * 100).toFixed(1)}%` : "--", status: "neutral", desc: `${calibration?.total_signals || 0} of ${calibration?.total_predictions || 0} predictions` },
   ];
 
   return (
@@ -74,10 +68,13 @@ function MetricsGrid() {
       {metrics.map((m) => (
         <div key={m.label} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div className="text-xs text-gray-500 mb-1">{m.label}</div>
-          <div className="text-xl font-bold text-white">{m.value}</div>
+          <div className={`text-xl font-bold ${m.status === "good" ? "text-emerald-400" : m.status === "bad" ? "text-red-400" : "text-white"}`}>{m.value}</div>
           <div className="text-xs text-gray-500 mt-1">{m.desc}</div>
-          <div
-            className={`text-xs mt-2 px-2 py-0.5 rounded inline-block ${
+        </div>
+      ))}
+    </div>
+  );
+}
               m.status === "good"
                 ? "bg-emerald-900 text-emerald-400"
                 : m.status === "warning"
@@ -106,6 +103,51 @@ export default function Analytics() {
         <>
           <MetricsGrid />
           <CalibrationChart curve={calibration?.calibration_curve || []} />
+
+          {/* Calibration by Time-to-Expiry */}
+          {calibration?.calibration_by_expiry && calibration.calibration_by_expiry.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+              <h3 className="text-lg font-semibold mb-4">Calibration by Time-to-Expiry</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-gray-800">
+                      <th className="text-left py-2 px-3">Bucket</th>
+                      <th className="text-right py-2 px-3">Count</th>
+                      <th className="text-right py-2 px-3">Model P</th>
+                      <th className="text-right py-2 px-3">Market P</th>
+                      <th className="text-right py-2 px-3">Actual</th>
+                      <th className="text-right py-2 px-3">Accuracy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calibration.calibration_by_expiry.map((row) => (
+                      <tr key={row.bucket} className="border-b border-gray-800/50">
+                        <td className="py-2 px-3 text-white font-mono">{row.bucket}</td>
+                        <td className="py-2 px-3 text-right text-gray-400">{row.count}</td>
+                        <td className="py-2 px-3 text-right text-blue-400 font-mono">
+                          {row.avg_predicted ? `${(row.avg_predicted * 100).toFixed(1)}%` : "--"}
+                        </td>
+                        <td className="py-2 px-3 text-right text-yellow-400 font-mono">
+                          {row.avg_market ? `${(row.avg_market * 100).toFixed(1)}%` : "--"}
+                        </td>
+                        <td className="py-2 px-3 text-right text-emerald-400 font-mono">
+                          {row.actual_rate != null ? `${(row.actual_rate * 100).toFixed(1)}%` : "--"}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono">
+                          {row.accuracy != null ? (
+                            <span className={row.accuracy > 0.5 ? "text-emerald-400" : "text-red-400"}>
+                              {(row.accuracy * 100).toFixed(1)}%
+                            </span>
+                          ) : "--"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

@@ -84,6 +84,7 @@ class PredictionResponse(BaseModel):
     predicted_outcome: str
     edge: float | None
     edge_fee: float | None = None
+    bayse_implied: float | None = None
     signal_strength: float
     approved: bool
     reasons: list[str] | None
@@ -141,6 +142,13 @@ class CalibrationResponse(BaseModel):
     total_signals: int
     prediction_coverage: float | None
     signal_coverage: float | None
+    # Baseline comparison
+    brier_model: float | None  # Baysed model Brier score
+    brier_market: float | None  # Bayse implied probability Brier score
+    brier_baseline: float | None  # 50% baseline Brier score
+    edge_vs_market: float | None  # Brier improvement over market (positive = better)
+    # Calibration by time-to-expiry
+    calibration_by_expiry: list[dict[str, Any]]
 
 
 class TradeResponse(BaseModel):
@@ -522,6 +530,61 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
         prediction_coverage = total_predictions / total_snapshots if total_snapshots > 0 else None
         signal_coverage = total_signals / total_predictions if total_predictions > 0 else None
 
+        # Baseline comparison: Brier scores for model, market, and 50% baseline
+        baseline_result = await db.execute(text("""
+            SELECT
+                AVG(POWER(probability - actual_binary, 2)) AS brier_model,
+                AVG(POWER(bayse_implied - actual_binary, 2)) AS brier_market,
+                AVG(POWER(0.5 - actual_binary, 2)) AS brier_baseline
+            FROM (
+                SELECT
+                    probability,
+                    bayse_implied,
+                    CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END AS actual_binary
+                FROM predictions
+                WHERE outcome_resolution != 'pending'
+                  AND probability IS NOT NULL
+                  AND bayse_implied IS NOT NULL
+            ) sub
+        """))
+        row = baseline_result.fetchone()
+        brier_model = float(row[0]) if row and row[0] else None
+        brier_market = float(row[1]) if row and row[1] else None
+        brier_baseline = float(row[2]) if row and row[2] else None
+        edge_vs_market = (brier_market - brier_model) if brier_model is not None and brier_market is not None else None
+
+        # Calibration by time-to-expiry buckets
+        expiry_result = await db.execute(text("""
+            SELECT
+                CASE
+                    WHEN seconds_remaining <= 60 THEN '0-1m'
+                    WHEN seconds_remaining <= 180 THEN '1-3m'
+                    WHEN seconds_remaining <= 300 THEN '3-5m'
+                    WHEN seconds_remaining <= 600 THEN '5-10m'
+                    ELSE '10-15m'
+                END AS time_bucket,
+                COUNT(*) AS cnt,
+                AVG(probability) AS avg_prob,
+                AVG(bayse_implied) AS avg_market,
+                AVG(CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END) AS actual_rate,
+                AVG(CASE WHEN prediction_correct = true THEN 1.0 ELSE 0.0 END) AS accuracy
+            FROM predictions
+            WHERE outcome_resolution != 'pending'
+              AND probability IS NOT NULL
+            GROUP BY time_bucket
+            ORDER BY MIN(seconds_remaining)
+        """))
+        calibration_by_expiry = []
+        for row in expiry_result.fetchall():
+            calibration_by_expiry.append({
+                "bucket": row[0],
+                "count": row[1] or 0,
+                "avg_predicted": round(float(row[2]), 4) if row[2] else None,
+                "avg_market": round(float(row[3]), 4) if row[3] else None,
+                "actual_rate": round(float(row[4]), 4) if row[4] else None,
+                "accuracy": round(float(row[5]), 4) if row[5] else None,
+            })
+
         return CalibrationResponse(
             total=total,
             resolved=resolved,
@@ -535,12 +598,21 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
             total_signals=total_signals,
             prediction_coverage=prediction_coverage,
             signal_coverage=signal_coverage,
+            brier_model=brier_model,
+            brier_market=brier_market,
+            brier_baseline=brier_baseline,
+            edge_vs_market=edge_vs_market,
+            calibration_by_expiry=calibration_by_expiry,
         )
     except Exception as e:
         logging.getLogger(__name__).error("calibration error: %s", e)
         return CalibrationResponse(
             total=0, resolved=0, pending=0, correct=0,
             accuracy=None, brier_mean=None, calibration_curve=[],
+            total_snapshots=0, total_predictions=0, total_signals=0,
+            prediction_coverage=None, signal_coverage=None,
+            brier_model=None, brier_market=None, brier_baseline=None,
+            edge_vs_market=None, calibration_by_expiry=[],
         )
 
 

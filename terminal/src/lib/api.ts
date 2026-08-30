@@ -45,6 +45,7 @@ export interface Prediction {
   predicted_outcome: string;
   edge: number | null;
   edge_fee: number | null;
+  bayse_implied: number | null;
   signal_strength: number;
   approved: boolean;
   reasons: string[] | null;
@@ -106,6 +107,18 @@ export interface Calibration {
   total_signals: number;
   prediction_coverage: number | null;
   signal_coverage: number | null;
+  brier_model: number | null;
+  brier_market: number | null;
+  brier_baseline: number | null;
+  edge_vs_market: number | null;
+  calibration_by_expiry: {
+    bucket: string;
+    count: number;
+    avg_predicted: number | null;
+    avg_market: number | null;
+    actual_rate: number | null;
+    accuracy: number | null;
+  }[];
 }
 
 export interface Trade {
