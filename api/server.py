@@ -200,24 +200,36 @@ async def health():
 @app.get("/debug")
 async def debug():
     from .shared import bot_diagnostics
-    # Test Bayse API connectivity
     bayse_ok = False
     bayse_events = 0
     resolved_events = 0
     resolved_markets = 0
+    resolved_error = None
+
+    # Test open events (unauthenticated)
     try:
         from bayse_bot.bayse import BayseClient
         async with BayseClient("https://relay.bayse.markets") as client:
             events = await client.events_by_series("crypto-btc-15min")
             bayse_events = len(events)
             bayse_ok = True
-            # Also check resolved events
+    except Exception as e:
+        bayse_ok = False
+
+    # Test resolved events (may require auth)
+    try:
+        import os
+        from bayse_bot.bayse import BayseClient
+        pub = os.getenv("BAYSE_PUBLIC_KEY", "")
+        sec = os.getenv("BAYSE_SECRET_KEY", "")
+        async with BayseClient("https://relay.bayse.markets", pub, sec) as client:
             resolved = await client.resolved_events("crypto-btc-15min")
             resolved_events = len(resolved)
             for evt in resolved:
                 resolved_markets += len(evt.get("markets", []))
     except Exception as e:
-        bayse_ok = False
+        resolved_error = f"{type(e).__name__}: {e}"
+
     return {
         "btc_price": float(shared_state.btc_price) if shared_state.btc_price else None,
         "btc_connected": shared_state.last_tick_at is not None if hasattr(shared_state, 'last_tick_at') else False,
@@ -229,6 +241,8 @@ async def debug():
         "bayse_events": bayse_events,
         "resolved_events": resolved_events,
         "resolved_markets": resolved_markets,
+        "resolved_error": resolved_error,
+        "has_api_keys": bool(os.getenv("BAYSE_PUBLIC_KEY")),
     }
 
 
