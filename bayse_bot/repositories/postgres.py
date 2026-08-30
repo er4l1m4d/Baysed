@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
-    RiskRepository, MarketRepository, EventLogRepository,
+    RiskRepository, MarketRepository, MarketOutcomeRepository, EventLogRepository,
 )
 
 
