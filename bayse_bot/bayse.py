@@ -1,11 +1,13 @@
 """Documented Bayse HTTP adapter; unknown fields remain in `raw` for traceability."""
 from __future__ import annotations
-import asyncio, base64, hashlib, hmac, json, time
+import asyncio, base64, hashlib, hmac, json, logging, time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 import aiohttp
 from .models import BookLevel, OrderBook, Outcome, Quote
+
+log = logging.getLogger(__name__)
 
 DOCS = "https://docs.bayse.markets/"
 
@@ -70,10 +72,17 @@ class BayseClient:
         return self._event_list(await self.request("GET", f"/v1/pm/events?seriesSlug={slug}&status=open", authenticated=bool(self.public_key)))
     async def resolved_events(self, series_slug: str | None = None) -> list[dict[str, Any]]:
         """Fetch resolved events, optionally filtered by series. Used for outcome tracking."""
-        path = "/v1/pm/events?status=resolved"
+        path = "/v1/pm/events?status=resolved&size=50"
         if series_slug:
             path += f"&seriesSlug={series_slug}"
-        return self._event_list(await self.request("GET", path, authenticated=bool(self.public_key)))
+        try:
+            return self._event_list(await self.request("GET", path, authenticated=bool(self.public_key)))
+        except BayseHTTPError as exc:
+            # If filtered query fails, try without seriesSlug
+            if series_slug and exc.status >= 400:
+                log.warning("resolved_events with seriesSlug failed (%d), retrying without filter", exc.status)
+                return self._event_list(await self.request("GET", "/v1/pm/events?status=resolved&size=50", authenticated=bool(self.public_key)))
+            raise
     async def series_events(self, slug: str) -> list[dict[str, Any]]:
         """Fetch lean events for a series (lightweight, no full market details)."""
         raw = await self.request("GET", f"/v1/pm/events/series/{slug}/lean-events")
