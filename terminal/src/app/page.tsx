@@ -65,7 +65,7 @@ function PriceCard() {
 }
 
 function StatsRow() {
-  const { status, loading } = useBotStatus();
+  const { calibration, loading } = useCalibration();
 
   if (loading) {
     return (
@@ -82,23 +82,27 @@ function StatsRow() {
 
   const stats = [
     {
-      label: "Total Predictions",
-      value: String(status?.total_predictions || 0),
+      label: "Snapshots",
+      value: String(calibration?.total_snapshots || 0),
       color: "text-white",
     },
     {
-      label: "Accuracy",
-      value: status?.accuracy ? `${(status.accuracy * 100).toFixed(1)}%` : "--",
-      color: "text-emerald-400",
-    },
-    {
-      label: "Brier Score",
-      value: status?.brier_mean ? status.brier_mean.toFixed(4) : "--",
+      label: "Predictions",
+      value: calibration?.prediction_coverage != null
+        ? `${calibration.total_predictions} (${(calibration.prediction_coverage * 100).toFixed(0)}%)`
+        : String(calibration?.total_predictions || 0),
       color: "text-blue-400",
     },
     {
+      label: "Signals",
+      value: calibration?.signal_coverage != null
+        ? `${calibration.total_signals} (${(calibration.signal_coverage * 100).toFixed(0)}%)`
+        : String(calibration?.total_signals || 0),
+      color: "text-emerald-400",
+    },
+    {
       label: "Resolved",
-      value: String(status?.total_resolved || 0),
+      value: calibration?.resolved ? `${calibration.resolved} (${(calibration.accuracy || 0) * 100}%)` : "0",
       color: "text-yellow-400",
     },
   ];

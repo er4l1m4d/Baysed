@@ -133,6 +133,12 @@ class CalibrationResponse(BaseModel):
     accuracy: float | None
     brier_mean: float | None
     calibration_curve: list[dict[str, Any]]
+    # Coverage metrics
+    total_snapshots: int
+    total_predictions: int
+    total_signals: int
+    prediction_coverage: float | None
+    signal_coverage: float | None
 
 
 class TradeResponse(BaseModel):
@@ -416,6 +422,17 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
                 "gap": round(avg_prob - actual_rate, 4),
             })
 
+        # Coverage metrics
+        total_snapshots = total
+        total_predictions = (await db.execute(
+            select(func.count(Prediction.id)).where(Prediction.probability.isnot(None))
+        )).scalar() or 0
+        total_signals = (await db.execute(
+            select(func.count(Prediction.id)).where(Prediction.approved == True)
+        )).scalar() or 0
+        prediction_coverage = total_predictions / total_snapshots if total_snapshots > 0 else None
+        signal_coverage = total_signals / total_predictions if total_predictions > 0 else None
+
         return CalibrationResponse(
             total=total,
             resolved=resolved,
@@ -424,6 +441,11 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
             accuracy=correct / resolved if resolved > 0 else None,
             brier_mean=float(brier_mean) if brier_mean else None,
             calibration_curve=curve,
+            total_snapshots=total_snapshots,
+            total_predictions=total_predictions,
+            total_signals=total_signals,
+            prediction_coverage=prediction_coverage,
+            signal_coverage=signal_coverage,
         )
     except Exception as e:
         logging.getLogger(__name__).error("calibration error: %s", e)

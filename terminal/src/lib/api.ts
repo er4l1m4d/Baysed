@@ -99,6 +99,11 @@ export interface Calibration {
     actual_rate: number;
     gap: number;
   }[];
+  total_snapshots: number;
+  total_predictions: number;
+  total_signals: number;
+  prediction_coverage: number | null;
+  signal_coverage: number | null;
 }
 
 export interface Trade {
