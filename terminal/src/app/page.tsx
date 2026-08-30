@@ -16,17 +16,11 @@ function PriceCard() {
       color: "bg-emerald-900 text-emerald-400",
       dotColor: "bg-emerald-400 animate-pulse",
     },
-    stale: {
-      label: "STALE",
-      sublabel: `${secondsSinceUpdate}s ago`,
-      color: "bg-yellow-900 text-yellow-400",
-      dotColor: "bg-yellow-400",
-    },
-    fallback: {
-      label: "FALLBACK",
-      sublabel: "Bot snapshot",
-      color: "bg-red-900 text-red-400",
-      dotColor: "bg-red-400",
+    polling: {
+      label: "API",
+      sublabel: `Updated ${secondsSinceUpdate}s ago`,
+      color: "bg-blue-900 text-blue-400",
+      dotColor: "bg-blue-400",
     },
   };
 

@@ -172,14 +172,14 @@ export function useLiveMarketState() {
   return { liveMarket, loading };
 }
 
-type PriceSource = "live" | "stale" | "fallback";
+type PriceSource = "live" | "polling";
 
 export function useLivePrice() {
   const [price, setPrice] = useState<number | null>(null);
   const [momentum, setMomentum] = useState(0);
   const [volatility, setVolatility] = useState(0);
   const [connected, setConnected] = useState(false);
-  const [source, setSource] = useState<PriceSource>("fallback");
+  const [source, setSource] = useState<PriceSource>("polling");
   const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
   const lastPriceAtRef = useRef<Date | null>(null);
@@ -187,18 +187,29 @@ export function useLivePrice() {
   useEffect(() => {
     let active = true;
 
-    const unsub = connectWebSocket((p, m, v) => {
+    // Primary: REST polling (works reliably on Render free tier + Vercel)
+    async function pollPrice() {
       if (!active) return;
-      setPrice(p);
-      setMomentum(m);
-      setVolatility(v);
-      setConnected(true);
-      setSource("live");
-      const now = new Date();
-      lastPriceAtRef.current = now;
-      setLastUpdateAt(now);
-      setSecondsSinceUpdate(0);
-    });
+      try {
+        const status = await getStatus();
+        if (active && status.last_btc_price) {
+          setPrice(status.last_btc_price);
+          setMomentum(status.last_momentum_pct || 0);
+          setVolatility(status.last_volatility || 0);
+          setConnected(true);
+          setSource("polling");
+          const now = new Date();
+          lastPriceAtRef.current = now;
+          setLastUpdateAt(now);
+          setSecondsSinceUpdate(0);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    pollPrice();
+    const pollInterval = setInterval(pollPrice, 5000);
 
     // Check staleness every second
     const stalenessInterval = setInterval(() => {
@@ -206,20 +217,35 @@ export function useLivePrice() {
       if (lastPriceAtRef.current) {
         const elapsed = Math.floor((Date.now() - lastPriceAtRef.current.getTime()) / 1000);
         setSecondsSinceUpdate(elapsed);
-
-        if (elapsed > 30) {
-          setSource("stale");
-        }
       }
     }, 1000);
 
+    // Try WebSocket as enhancement (if it connects, upgrade to live)
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = connectWebSocket((p, m, v) => {
+        if (!active) return;
+        setPrice(p);
+        setMomentum(m);
+        setVolatility(v);
+        setConnected(true);
+        setSource("live");
+        const now = new Date();
+        lastPriceAtRef.current = now;
+        setLastUpdateAt(now);
+        setSecondsSinceUpdate(0);
+      });
+    } catch {
+      // WebSocket not available, REST polling is fine
+    }
+
     return () => {
       active = false;
-      unsub();
-      setConnected(false);
-      setSource("fallback");
-      lastPriceAtRef.current = null;
+      clearInterval(pollInterval);
       clearInterval(stalenessInterval);
+      if (unsub) unsub();
+      setConnected(false);
+      lastPriceAtRef.current = null;
     };
   }, []);
 
