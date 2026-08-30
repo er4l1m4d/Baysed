@@ -248,6 +248,69 @@ async def debug():
     }
 
 
+@app.get("/debug/resolution")
+async def debug_resolution():
+    """Debug endpoint to see what the resolver sees."""
+    import os
+    from bayse_bot.bayse import BayseClient
+    from bayse_bot.predictions import outcome_from_bayse_resolved
+
+    result = {"resolved_events_raw": [], "market_resolution": {}, "pending_market_ids": [], "matches": []}
+
+    try:
+        pub = os.getenv("BAYSE_PUBLIC_KEY", "")
+        sec = os.getenv("BAYSE_SECRET_KEY", "")
+        async with BayseClient("https://relay.bayse.markets", pub, sec) as client:
+            resolved = await client.resolved_events()
+
+            for evt in resolved[:5]:  # First 5 events
+                for mkt in evt.get("markets", []):
+                    market_id = mkt.get("id") or mkt.get("marketId")
+                    resolved_outcome_id = mkt.get("resolvedOutcomeId")
+                    outcome1_id = mkt.get("outcome1Id")
+                    outcome2_id = mkt.get("outcome2Id")
+                    if market_id and resolved_outcome_id:
+                        result["market_resolution"][market_id] = {
+                            "resolved_outcome_id": resolved_outcome_id,
+                            "outcome1_id": outcome1_id,
+                            "outcome2_id": outcome2_id,
+                        }
+                        # Try to map it
+                        try:
+                            mapped = outcome_from_bayse_resolved(resolved_outcome_id, outcome1_id or "", outcome2_id or "")
+                            result["market_resolution"][market_id]["mapped"] = mapped
+                        except Exception as e:
+                            result["market_resolution"][market_id]["mapped_error"] = str(e)
+
+            result["resolved_events_count"] = len(resolved)
+    except Exception as e:
+        result["resolved_error"] = str(e)
+
+    # Get pending prediction market_ids
+    try:
+        from sqlalchemy import select
+        from api.models import Prediction
+        from api.server import get_db
+        async for db in get_db():
+            preds = await db.execute(
+                select(Prediction.market_id, Prediction.outcome1_id, Prediction.outcome2_id)
+                .where(Prediction.outcome_resolution == "pending")
+                .limit(10)
+            )
+            for row in preds.fetchall():
+                result["pending_market_ids"].append({
+                    "market_id": row[0],
+                    "outcome1_id": row[1],
+                    "outcome2_id": row[2],
+                    "in_resolved": row[0] in result["market_resolution"],
+                })
+            break
+    except Exception as e:
+        result["db_error"] = str(e)
+
+    return result
+
+
 @app.get("/state", response_model=LiveMarketResponse)
 async def get_live_state(db: AsyncSession = Depends(get_db)):
     """Canonical live market state for the terminal.
