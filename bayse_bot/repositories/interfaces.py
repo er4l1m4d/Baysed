@@ -67,26 +67,6 @@ class PredictionRepository(ABC):
         """Get calibration statistics (total, resolved, correct, brier_mean, curve)."""
         ...
 
-    @abstractmethod
-    async def count_predictions(self) -> int:
-        """Get total prediction count."""
-        ...
-
-    @abstractmethod
-    async def count_resolved(self) -> int:
-        """Get resolved prediction count."""
-        ...
-
-    @abstractmethod
-    async def count_correct(self) -> int:
-        """Get correct prediction count."""
-        ...
-
-    @abstractmethod
-    async def get_brier_mean(self) -> Decimal | None:
-        """Get mean Brier score across resolved predictions."""
-        ...
-
 
 # ---------------------------------------------------------------------------
 # Trade Repository

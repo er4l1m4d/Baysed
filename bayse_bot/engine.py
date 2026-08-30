@@ -376,8 +376,14 @@ class Bot:
                 await self.pred_rec.record(pred)
 
                 # Update bot status prediction count
-                total = await self.repos.predictions.count_predictions()
-                await self.repos.bot_status.update_status({"total_predictions": total})
+                try:
+                    from sqlalchemy import select, func
+                    from api.models import Prediction
+                    async with self.repos.predictions._session() as s:
+                        total = (await s.execute(select(func.count(Prediction.id)))).scalar() or 0
+                    await self.repos.bot_status.update_status({"total_predictions": total})
+                except Exception:
+                    pass
 
             # Log decision
             await self.repos.event_log.log_event(
