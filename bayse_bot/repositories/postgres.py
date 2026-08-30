@@ -225,6 +225,7 @@ class PostgresPredictionRepository(PredictionRepository):
             "probability": float(pred.probability) if pred.probability else None,
             "predicted_outcome": pred.predicted_outcome or "",
             "edge": float(pred.edge) if pred.edge else None,
+            "edge_fee": float(pred.edge_fee) if pred.edge_fee else None,
             "signal_strength": float(pred.signal_strength),
             "approved": pred.approved,
             "reasons": pred.reasons,

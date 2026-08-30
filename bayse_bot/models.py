@@ -151,7 +151,8 @@ class Decision:
     strategy: str
     outcome: Outcome | None
     probability: Decimal | None  # Always P(YES), regardless of predicted outcome
-    edge: Decimal | None
+    edge: Decimal | None  # Raw edge: probability - price
+    edge_fee: Decimal | None  # Fee-adjusted edge: probability - break_even_price
     strength: Decimal
     approved: bool
     reasons: tuple[str, ...]

@@ -44,6 +44,7 @@ export interface Prediction {
   probability: number | null;
   predicted_outcome: string;
   edge: number | null;
+  edge_fee: number | null;
   signal_strength: number;
   approved: boolean;
   reasons: string[] | null;
@@ -81,6 +82,7 @@ export interface LiveMarketState {
   model_probability: number | null;
   model_predicted_outcome: string | null;
   edge: number | null;
+  edge_fee: number | null;
   approved: boolean;
   is_active: boolean;
 }

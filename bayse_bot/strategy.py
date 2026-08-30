@@ -22,6 +22,27 @@ def probability_from_momentum(momentum_pct: Decimal) -> Decimal:
     """Legacy momentum-only model. Kept for backward compat."""
     return max(Decimal("0.01"), min(Decimal("0.99"), Decimal("0.5") + momentum_pct * Decimal("4")))
 
+# Bayse fee constants
+FEE_RATE = Decimal("0.10")  # 10% taker fee
+
+def fee_adjusted_edge(model_probability: Decimal, price: Decimal) -> Decimal | None:
+    """Calculate edge after accounting for Bayse trading fees.
+
+    Bayse fee formula: fee = feeRate * C * P * max(1 - P, 0.5)
+    This means the break-even model probability is:
+        P_be = P / (1 - feeRate * max(1 - P, 0.5))
+
+    Returns model_probability - P_be. Positive = profitable after fees.
+    """
+    if price is None or price <= 0 or price >= 1:
+        return None
+    floor_factor = max(Decimal("1") - price, Decimal("0.5"))
+    denom = Decimal("1") - FEE_RATE * floor_factor
+    if denom <= 0:
+        return None
+    p_be = price / denom  # break-even model probability
+    return model_probability - p_be
+
 def probability_from_distance_to_strike(
     distance_pct: Decimal,
     volatility_pct: Decimal,
@@ -90,7 +111,7 @@ class DistanceToStrikeModel(Strategy):
 
         if not contract:
             reasons.append("no_contract_state")
-            return Decision(self.name, None, None, None, Decimal("0"), False, tuple(reasons))
+            return Decision(self.name, None, None, None, None, Decimal("0"), False, tuple(reasons))
 
         # Compute probability from distance + volatility + time remaining
         probability = probability_from_distance_to_strike(
@@ -103,8 +124,11 @@ class DistanceToStrikeModel(Strategy):
         outcome = Outcome.YES if probability > Decimal("0.5") else Outcome.NO
         price = x.yes_ask if outcome is Outcome.YES else x.no_ask
 
-        # Edge: model probability minus market price
+        # Edge: model probability minus market price (raw)
         edge = probability - price if price else None
+
+        # Fee-adjusted edge: accounts for Bayse taker fees
+        edge_fee = fee_adjusted_edge(probability, price)
 
         # Strength: how far z-score is from 0 (normalized)
         time_frac = Decimal(str(contract.seconds_remaining)) / Decimal("900")
@@ -115,11 +139,13 @@ class DistanceToStrikeModel(Strategy):
         if x.yes_ask is None or x.no_ask is None:
             reasons.append("missing_book_prices")
 
-        # Edge guards
+        # Edge guards — use fee-adjusted edge for approval decisions
         if edge is not None and edge < s.min_model_gap:
             reasons.append("model_edge_below_minimum")
         if edge is not None and edge > s.max_model_gap:
             reasons.append("model_edge_above_guardrail")
+        if edge_fee is not None and edge_fee < 0:
+            reasons.append("negative_edge_after_fees")
         if strength < s.min_strength:
             reasons.append("signal_strength_below_minimum")
 
@@ -128,7 +154,7 @@ class DistanceToStrikeModel(Strategy):
             reasons.append("too_close_to_expiry")
 
         return Decision(
-            self.name, outcome, probability, edge, strength,
+            self.name, outcome, probability, edge, edge_fee, strength,
             not reasons, tuple(reasons),
         )
 
@@ -141,24 +167,28 @@ class MomentumContinuation(Strategy):
     def evaluate(self, x, s):
         reasons=self._qualified(x,s); outcome=Outcome.YES if x.btc.momentum_pct >= 0 else Outcome.NO
         probability=probability_from_momentum(x.btc.momentum_pct); price=x.yes_ask if outcome is Outcome.YES else x.no_ask
-        edge=(probability if outcome is Outcome.YES else 1-probability)-price; strength=abs(x.btc.momentum_pct)/max(s.momentum_threshold,Decimal("0.0001"))
+        edge=(probability if outcome is Outcome.YES else 1-probability)-price
+        edge_fee=fee_adjusted_edge(probability, price)
+        strength=abs(x.btc.momentum_pct)/max(s.momentum_threshold,Decimal("0.0001"))
         if edge < s.min_model_gap: reasons.append("model_edge_below_minimum")
         if edge > s.max_model_gap: reasons.append("model_edge_above_guardrail")
+        if edge_fee is not None and edge_fee < 0: reasons.append("negative_edge_after_fees")
         if strength < s.min_strength: reasons.append("signal_strength_below_minimum")
-        return Decision(self.name,outcome,probability,edge,strength,not reasons,tuple(reasons))
+        return Decision(self.name,outcome,probability,edge,edge_fee,strength,not reasons,tuple(reasons))
 
 class MeanReversionInversion(MomentumContinuation):
     name="mean_reversion_inversion"
     def evaluate(self,x,s):
         base=super().evaluate(x,s); outcome=Outcome.NO if base.outcome is Outcome.YES else Outcome.YES
-        # Invert probability: if base says P(YES)=0.7, inverted says P(YES)=0.3
         probability=(1-base.probability) if base.probability is not None else None
         price=x.yes_ask if outcome is Outcome.YES else x.no_ask
         edge=(probability-price) if probability is not None else None
+        edge_fee=fee_adjusted_edge(probability, price)
         reasons=[r for r in base.reasons if not r.startswith("model_edge")]
         if edge is None or edge < s.min_model_gap: reasons.append("model_edge_below_minimum")
         if edge is not None and edge > s.max_model_gap: reasons.append("model_edge_above_guardrail")
-        return Decision(self.name,outcome,probability,edge,base.strength,not reasons,tuple(reasons))
+        if edge_fee is not None and edge_fee < 0: reasons.append("negative_edge_after_fees")
+        return Decision(self.name,outcome,probability,edge,edge_fee,base.strength,not reasons,tuple(reasons))
 
 class DirectBTCMomentum(MomentumContinuation):
     name="direct_btc_momentum"

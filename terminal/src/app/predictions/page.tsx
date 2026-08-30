@@ -31,6 +31,11 @@ function ExpandedDetail({ pred }: { pred: Prediction }) {
               <span className={`font-mono ${pred.edge && pred.edge > 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {pred.edge ? `${pred.edge > 0 ? "+" : ""}${pred.edge.toFixed(4)}` : "--"}
               </span>
+              <span className="text-gray-600 ml-2">(after fees: </span>
+              <span className={`font-mono ${pred.edge_fee && pred.edge_fee > 0 ? "text-emerald-300" : "text-red-300"}`}>
+                {pred.edge_fee ? `${pred.edge_fee > 0 ? "+" : ""}${pred.edge_fee.toFixed(4)}` : "--"}
+              </span>
+              <span className="text-gray-600">)</span>
             </div>
             <div>
               <span className="text-gray-500">Signal Strength: </span>
@@ -207,7 +212,12 @@ function PredictionRow({
           {pred.probability ? `${(pred.probability * 100).toFixed(1)}%` : "--"}
         </td>
         <td className="py-3 px-4 text-sm font-mono">
-          {pred.edge ? `${pred.edge > 0 ? "+" : ""}${pred.edge.toFixed(4)}` : "--"}
+          <span className={pred.edge && pred.edge > 0 ? "text-emerald-400" : "text-red-400"}>
+            {pred.edge ? `${pred.edge > 0 ? "+" : ""}${pred.edge.toFixed(4)}` : "--"}
+          </span>
+          <span className="text-gray-600 text-xs block">
+            fees: {pred.edge_fee ? `${pred.edge_fee > 0 ? "+" : ""}${pred.edge_fee.toFixed(4)}` : "--"}
+          </span>
         </td>
         <td className="py-3 px-4 text-sm font-mono">
           {cost ? `$${cost.toFixed(2)}` : "--"}

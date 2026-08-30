@@ -232,9 +232,14 @@ function LiveMarketCard() {
 
       <div className="flex justify-between text-xs text-gray-500">
         <span>Model: {liveMarket.model_probability ? `${(liveMarket.model_probability * 100).toFixed(1)}%` : "--"}</span>
-        <span className={liveMarket.edge && liveMarket.edge > 0 ? "text-emerald-400" : "text-red-400"}>
-          Edge: {liveMarket.edge ? `${liveMarket.edge > 0 ? "+" : ""}${liveMarket.edge.toFixed(4)}` : "--"}
-        </span>
+        <div className="flex gap-3">
+          <span className={liveMarket.edge && liveMarket.edge > 0 ? "text-emerald-400" : "text-red-400"}>
+            Edge: {liveMarket.edge ? `${liveMarket.edge > 0 ? "+" : ""}${liveMarket.edge.toFixed(4)}` : "--"}
+          </span>
+          <span className={liveMarket.edge_fee && liveMarket.edge_fee > 0 ? "text-emerald-300" : "text-red-300"}>
+            After fees: {liveMarket.edge_fee ? `${liveMarket.edge_fee > 0 ? "+" : ""}${liveMarket.edge_fee.toFixed(4)}` : "--"}
+          </span>
+        </div>
       </div>
     </div>
   );

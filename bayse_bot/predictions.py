@@ -76,6 +76,7 @@ class PredictionRecord:
     probability: Decimal | None = None
     predicted_outcome: str = ""  # "YES" or "NO"
     edge: Decimal | None = None
+    edge_fee: Decimal | None = None  # Fee-adjusted edge
     signal_strength: Decimal = Decimal("0")
     approved: bool = False
     reasons: tuple[str, ...] = ()

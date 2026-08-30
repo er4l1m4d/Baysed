@@ -357,6 +357,7 @@ class Bot:
                     probability=decision.probability,
                     predicted_outcome=decision.outcome.value if decision.outcome else "",
                     edge=decision.edge,
+                    edge_fee=decision.edge_fee,
                     signal_strength=decision.strength,
                     approved=decision.approved,
                     reasons=tuple(reasons),
