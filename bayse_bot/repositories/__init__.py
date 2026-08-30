@@ -123,9 +123,6 @@ async def create_repositories(database_url: str) -> RepositorySet:
             )
         """))
 
-    def get_session():
-        return session_factory()
-
     from .postgres import (
         PostgresPredictionRepository, PostgresTradeRepository,
         PostgresBotStatusRepository, PostgresRiskRepository,
@@ -134,11 +131,11 @@ async def create_repositories(database_url: str) -> RepositorySet:
     )
 
     return RepositorySet(
-        predictions=PostgresPredictionRepository(get_session()),
-        trades=PostgresTradeRepository(get_session()),
-        bot_status=PostgresBotStatusRepository(get_session()),
-        risk=PostgresRiskRepository(get_session()),
-        market=PostgresMarketRepository(get_session()),
-        market_outcome=PostgresMarketOutcomeRepository(get_session()),
-        event_log=PostgresEventLogRepository(get_session()),
+        predictions=PostgresPredictionRepository(session_factory),
+        trades=PostgresTradeRepository(session_factory),
+        bot_status=PostgresBotStatusRepository(session_factory),
+        risk=PostgresRiskRepository(session_factory),
+        market=PostgresMarketRepository(session_factory),
+        market_outcome=PostgresMarketOutcomeRepository(session_factory),
+        event_log=PostgresEventLogRepository(session_factory),
     )

@@ -4,12 +4,13 @@ Uses async SQLAlchemy for all database operations.
 Works with Neon, Render Postgres, or any PostgreSQL provider.
 """
 from __future__ import annotations
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import select, func, update, Integer, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
@@ -17,51 +18,71 @@ from .interfaces import (
 )
 
 
+def _new_session(factory: async_sessionmaker) -> Callable[[], AsyncSession]:
+    """Return a function that creates a fresh session."""
+    return lambda: factory()
+
+
 class PostgresPredictionRepository(PredictionRepository):
     """PostgreSQL implementation of prediction persistence."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def save_prediction(self, prediction: dict[str, Any]) -> None:
         from api.models import Prediction
-        pred = Prediction(**prediction)
-        self.session.add(pred)
-        await self.session.flush()
-        await self.session.commit()
+        async with self._session() as s:
+            pred = Prediction(**prediction)
+            s.add(pred)
+            await s.flush()
 
     async def get_latest_prediction(self, market_id: str) -> dict[str, Any] | None:
         from api.models import Prediction
-        result = await self.session.execute(
-            select(Prediction)
-            .where(Prediction.market_id == market_id)
-            .order_by(Prediction.recorded_at.desc())
-            .limit(1)
-        )
-        pred = result.scalar_one_or_none()
-        if not pred:
-            return None
-        return self._to_dict(pred)
+        async with self._session() as s:
+            result = await s.execute(
+                select(Prediction)
+                .where(Prediction.market_id == market_id)
+                .order_by(Prediction.recorded_at.desc())
+                .limit(1)
+            )
+            pred = result.scalar_one_or_none()
+            if not pred:
+                return None
+            return self._to_dict(pred)
 
     async def get_predictions_for_market(self, market_id: str) -> list[dict[str, Any]]:
         from api.models import Prediction
-        result = await self.session.execute(
-            select(Prediction)
-            .where(Prediction.market_id == market_id)
-            .order_by(Prediction.recorded_at.asc())
-        )
-        return [self._to_dict(p) for p in result.scalars().all()]
+        async with self._session() as s:
+            result = await s.execute(
+                select(Prediction)
+                .where(Prediction.market_id == market_id)
+                .order_by(Prediction.recorded_at.asc())
+            )
+            return [self._to_dict(p) for p in result.scalars().all()]
 
     async def get_predictions(
         self, limit: int = 50, offset: int = 0, resolution: str | None = None
     ) -> list[dict[str, Any]]:
         from api.models import Prediction
-        query = select(Prediction).order_by(Prediction.recorded_at.desc())
-        if resolution:
-            query = query.where(Prediction.outcome_resolution == resolution)
-        query = query.offset(offset).limit(limit)
-        result = await self.session.execute(query)
-        return [self._to_dict(p) for p in result.scalars().all()]
+        async with self._session() as s:
+            query = select(Prediction).order_by(Prediction.recorded_at.desc())
+            if resolution:
+                query = query.where(Prediction.outcome_resolution == resolution)
+            query = query.offset(offset).limit(limit)
+            result = await s.execute(query)
+            return [self._to_dict(p) for p in result.scalars().all()]
 
     async def update_resolution(
         self,
@@ -72,138 +93,111 @@ class PostgresPredictionRepository(PredictionRepository):
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
     ) -> None:
-        """Update the LATEST prediction snapshot for a market with resolution data.
-
-        Only the most recent snapshot gets resolution fields. Older snapshots
-        for the same market remain as historical records — their outcome is
-        derived by joining to MarketOutcome via (market_id, resolved_at).
-        """
+        """Update the LATEST prediction snapshot for a market with resolution data."""
         from api.models import Prediction
+        async with self._session() as s:
+            result = await s.execute(
+                select(Prediction)
+                .where(Prediction.market_id == market_id)
+                .order_by(Prediction.recorded_at.desc())
+                .limit(1)
+            )
+            latest = result.scalar_one_or_none()
+            if not latest:
+                return
 
-        # Find the latest snapshot for this market
-        result = await self.session.execute(
-            select(Prediction)
-            .where(Prediction.market_id == market_id)
-            .order_by(Prediction.recorded_at.desc())
-            .limit(1)
-        )
-        latest = result.scalar_one_or_none()
-        if not latest:
-            return
+            values: dict[str, Any] = {
+                "outcome_resolution": outcome_resolution,
+                "resolved_at": datetime.now(timezone.utc),
+            }
+            if actual_price is not None:
+                values["actual_price"] = actual_price
+            if prediction_correct is not None:
+                values["prediction_correct"] = prediction_correct
+            if brier_score is not None:
+                values["brier_score"] = brier_score
+            if resolved_outcome_id is not None:
+                values["resolved_outcome_id"] = resolved_outcome_id
 
-        values: dict[str, Any] = {
-            "outcome_resolution": outcome_resolution,
-            "resolved_at": datetime.now(timezone.utc),
-        }
-        if actual_price is not None:
-            values["actual_price"] = actual_price
-        if prediction_correct is not None:
-            values["prediction_correct"] = prediction_correct
-        if brier_score is not None:
-            values["brier_score"] = brier_score
-        if resolved_outcome_id is not None:
-            values["resolved_outcome_id"] = resolved_outcome_id
-
-        await self.session.execute(
-            update(Prediction)
-            .where(Prediction.id == latest.id)
-            .values(**values)
-        )
-        await self.session.commit()
+            await s.execute(
+                update(Prediction)
+                .where(Prediction.id == latest.id)
+                .values(**values)
+            )
 
     async def get_pending_predictions(self) -> list[dict[str, Any]]:
         from api.models import Prediction
-        result = await self.session.execute(
-            select(Prediction).where(Prediction.outcome_resolution == "pending")
-        )
-        return [self._to_dict(p) for p in result.scalars().all()]
+        async with self._session() as s:
+            result = await s.execute(
+                select(Prediction).where(Prediction.outcome_resolution == "pending")
+            )
+            return [self._to_dict(p) for p in result.scalars().all()]
 
     async def get_pending_predictions_for_markets(self, market_ids: list[str]) -> list[dict[str, Any]]:
         """Get pending predictions only for specific markets (scoped resolution)."""
         if not market_ids:
             return []
         from api.models import Prediction
-        result = await self.session.execute(
-            select(Prediction).where(
-                Prediction.outcome_resolution == "pending",
-                Prediction.market_id.in_(market_ids),
+        async with self._session() as s:
+            result = await s.execute(
+                select(Prediction).where(
+                    Prediction.outcome_resolution == "pending",
+                    Prediction.market_id.in_(market_ids),
+                )
             )
-        )
-        return [self._to_dict(p) for p in result.scalars().all()]
+            return [self._to_dict(p) for p in result.scalars().all()]
 
     async def get_calibration_stats(self) -> dict[str, Any]:
         from api.models import Prediction
-        total = await self.count_predictions()
-        resolved = await self.count_resolved()
-        correct = await self.count_correct()
-        brier_mean = await self.get_brier_mean()
+        async with self._session() as s:
+            total = (await s.execute(select(func.count(Prediction.id)))).scalar() or 0
+            resolved = (await s.execute(
+                select(func.count(Prediction.id)).where(Prediction.outcome_resolution != "pending")
+            )).scalar() or 0
+            correct = (await s.execute(
+                select(func.count(Prediction.id)).where(Prediction.prediction_correct == True)
+            )).scalar() or 0
+            brier_avg = (await s.execute(
+                select(func.avg(Prediction.brier_score)).where(Prediction.brier_score.isnot(None))
+            )).scalar()
 
-        # Calibration curve: single grouped query for all 10 buckets
-        # Each row: bucket, count, avg_predicted, actual_yes_rate
-        result = await self.session.execute(text("""
-            SELECT
-                FLOOR(probability * 10) AS bucket_idx,
-                COUNT(*) AS cnt,
-                AVG(probability) AS avg_prob,
-                AVG(CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END) AS actual_yes_rate
-            FROM predictions
-            WHERE outcome_resolution != 'pending'
-              AND probability IS NOT NULL
-            GROUP BY FLOOR(probability * 10)
-            ORDER BY bucket_idx
-        """))
-        curve = []
-        for row in result.fetchall():
-            bucket_idx = int(row[0])
-            count = row[1] or 0
-            avg_prob = float(row[2]) if row[2] else 0
-            actual_rate = float(row[3]) if row[3] else 0
-            low = bucket_idx * 0.1
-            high = (bucket_idx + 1) * 0.1
-            curve.append({
-                "bucket": f"{int(low*100)}-{int(high*100)}%",
-                "count": count,
-                "avg_predicted": round(avg_prob, 4),
-                "actual_rate": round(actual_rate, 4),
-                "gap": round(avg_prob - actual_rate, 4),
-            })
+            result = await s.execute(text("""
+                SELECT
+                    FLOOR(probability * 10) AS bucket_idx,
+                    COUNT(*) AS cnt,
+                    AVG(probability) AS avg_prob,
+                    AVG(CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END) AS actual_yes_rate
+                FROM predictions
+                WHERE outcome_resolution != 'pending'
+                  AND probability IS NOT NULL
+                GROUP BY FLOOR(probability * 10)
+                ORDER BY bucket_idx
+            """))
+            curve = []
+            for row in result.fetchall():
+                bucket_idx = int(row[0])
+                count = row[1] or 0
+                avg_prob = float(row[2]) if row[2] else 0
+                actual_rate = float(row[3]) if row[3] else 0
+                low = bucket_idx * 0.1
+                high = (bucket_idx + 1) * 0.1
+                curve.append({
+                    "bucket": f"{int(low*100)}-{int(high*100)}%",
+                    "count": count,
+                    "avg_predicted": round(avg_prob, 4),
+                    "actual_rate": round(actual_rate, 4),
+                    "gap": round(avg_prob - actual_rate, 4),
+                })
 
-        return {
-            "total": total,
-            "resolved": resolved,
-            "pending": total - resolved,
-            "correct": correct,
-            "accuracy": correct / resolved if resolved > 0 else None,
-            "brier_mean": float(brier_mean) if brier_mean else None,
-            "calibration_curve": curve,
-        }
-
-    async def count_predictions(self) -> int:
-        from api.models import Prediction
-        result = await self.session.execute(select(func.count(Prediction.id)))
-        return result.scalar() or 0
-
-    async def count_resolved(self) -> int:
-        from api.models import Prediction
-        result = await self.session.execute(
-            select(func.count(Prediction.id)).where(Prediction.outcome_resolution != "pending")
-        )
-        return result.scalar() or 0
-
-    async def count_correct(self) -> int:
-        from api.models import Prediction
-        result = await self.session.execute(
-            select(func.count(Prediction.id)).where(Prediction.prediction_correct == True)
-        )
-        return result.scalar() or 0
-
-    async def get_brier_mean(self) -> Decimal | None:
-        from api.models import Prediction
-        result = await self.session.execute(
-            select(func.avg(Prediction.brier_score)).where(Prediction.brier_score.isnot(None))
-        )
-        avg = result.scalar()
-        return Decimal(str(avg)) if avg else None
+            return {
+                "total": total,
+                "resolved": resolved,
+                "pending": total - resolved,
+                "correct": correct,
+                "accuracy": correct / resolved if resolved > 0 else None,
+                "brier_mean": float(brier_avg) if brier_avg else None,
+                "calibration_curve": curve,
+            }
 
     def _to_dict(self, pred) -> dict[str, Any]:
         return {
@@ -256,63 +250,80 @@ class PostgresPredictionRepository(PredictionRepository):
 class PostgresTradeRepository(TradeRepository):
     """PostgreSQL implementation of trade persistence."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def save_trade(self, trade: dict[str, Any]) -> int:
         from api.models import TradeRecord
-        record = TradeRecord(**trade)
-        self.session.add(record)
-        await self.session.flush()
-        await self.session.commit()
-        return record.id
+        async with self._session() as s:
+            record = TradeRecord(**trade)
+            s.add(record)
+            await s.flush()
+            return record.id
 
     async def get_trade(self, trade_id: int) -> dict[str, Any] | None:
         from api.models import TradeRecord
-        result = await self.session.execute(
-            select(TradeRecord).where(TradeRecord.id == trade_id)
-        )
-        trade = result.scalar_one_or_none()
-        if not trade:
-            return None
-        return self._to_dict(trade)
+        async with self._session() as s:
+            result = await s.execute(
+                select(TradeRecord).where(TradeRecord.id == trade_id)
+            )
+            trade = result.scalar_one_or_none()
+            if not trade:
+                return None
+            return self._to_dict(trade)
 
     async def get_trades(
         self, limit: int = 50, offset: int = 0
     ) -> list[dict[str, Any]]:
         from api.models import TradeRecord
-        result = await self.session.execute(
-            select(TradeRecord)
-            .order_by(TradeRecord.recorded_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
-        return [self._to_dict(t) for t in result.scalars().all()]
+        async with self._session() as s:
+            result = await s.execute(
+                select(TradeRecord)
+                .order_by(TradeRecord.recorded_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            return [self._to_dict(t) for t in result.scalars().all()]
 
     async def update_trade_status(
         self, trade_id: int, status: str, order_id: str | None = None
     ) -> None:
         from api.models import TradeRecord
-        values: dict[str, Any] = {"status": status}
-        if order_id is not None:
-            values["order_id"] = order_id
-        await self.session.execute(
-            update(TradeRecord).where(TradeRecord.id == trade_id).values(**values)
-        )
+        async with self._session() as s:
+            values: dict[str, Any] = {"status": status}
+            if order_id is not None:
+                values["order_id"] = order_id
+            await s.execute(
+                update(TradeRecord).where(TradeRecord.id == trade_id).values(**values)
+            )
 
     async def get_open_trades(self) -> list[dict[str, Any]]:
         from api.models import TradeRecord
-        result = await self.session.execute(
-            select(TradeRecord).where(TradeRecord.status.in_(["pending", "open"]))
-        )
-        return [self._to_dict(t) for t in result.scalars().all()]
+        async with self._session() as s:
+            result = await s.execute(
+                select(TradeRecord).where(TradeRecord.status.in_(["pending", "open"]))
+            )
+            return [self._to_dict(t) for t in result.scalars().all()]
 
     async def get_uncertain_trades(self) -> list[dict[str, Any]]:
         from api.models import TradeRecord
-        result = await self.session.execute(
-            select(TradeRecord).where(TradeRecord.status == "unknown")
-        )
-        return [self._to_dict(t) for t in result.scalars().all()]
+        async with self._session() as s:
+            result = await s.execute(
+                select(TradeRecord).where(TradeRecord.status == "unknown")
+            )
+            return [self._to_dict(t) for t in result.scalars().all()]
 
     def _to_dict(self, trade) -> dict[str, Any]:
         return {
@@ -337,76 +348,86 @@ class PostgresTradeRepository(TradeRepository):
 class PostgresBotStatusRepository(BotStatusRepository):
     """PostgreSQL implementation of bot status persistence."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def get_status(self) -> dict[str, Any]:
         from api.models import BotStatus
-        import json
-        result = await self.session.execute(select(BotStatus).where(BotStatus.id == 1))
-        status = result.scalar_one_or_none()
-        if not status:
+        async with self._session() as s:
+            result = await s.execute(select(BotStatus).where(BotStatus.id == 1))
+            status = result.scalar_one_or_none()
+            if not status:
+                return {
+                    "is_running": False,
+                    "mode": "observation",
+                    "strategy": "distance_to_strike",
+                    "total_predictions": 0,
+                    "total_resolved": 0,
+                    "total_correct": 0,
+                    "uptime_seconds": 0,
+                    "error_count": 0,
+                }
+
+            now = datetime.now(timezone.utc)
+            last_cycle = status.last_cycle_at
+            if last_cycle:
+                seconds_since = (now - last_cycle).total_seconds()
+                is_healthy = seconds_since < 45
+                is_stale = 15 <= seconds_since < 45
+            else:
+                seconds_since = 999
+                is_healthy = False
+                is_stale = False
+
+            feed_health = status.feed_health or {}
+
             return {
-                "is_running": False,
-                "mode": "observation",
-                "strategy": "distance_to_strike",
-                "total_predictions": 0,
-                "total_resolved": 0,
-                "total_correct": 0,
-                "uptime_seconds": 0,
-                "error_count": 0,
+                "is_running": is_healthy,
+                "is_stale": is_stale,
+                "last_heartbeat_seconds_ago": round(seconds_since),
+                "mode": status.mode,
+                "strategy": status.strategy,
+                "last_cycle_at": last_cycle.isoformat() if last_cycle else None,
+                "last_btc_price": float(status.last_btc_price) if status.last_btc_price else None,
+                "last_momentum_pct": float(status.last_momentum_pct) if status.last_momentum_pct else None,
+                "last_volatility": float(status.last_volatility) if status.last_volatility else None,
+                "total_predictions": status.total_predictions,
+                "total_resolved": status.total_resolved,
+                "total_correct": status.total_correct,
+                "brier_mean": float(status.brier_mean) if status.brier_mean else None,
+                "uptime_seconds": status.uptime_seconds,
+                "error_count": status.error_count,
+                "last_error": status.last_error,
+                "feed_health": feed_health,
             }
-
-        # Derive liveness from heartbeat freshness (not boolean)
-        now = datetime.now(timezone.utc)
-        last_cycle = status.last_cycle_at
-        if last_cycle:
-            seconds_since = (now - last_cycle).total_seconds()
-            is_healthy = seconds_since < 45
-            is_stale = 15 <= seconds_since < 45
-        else:
-            seconds_since = 999
-            is_healthy = False
-            is_stale = False
-
-        # Use dedicated feed_health column
-        feed_health = status.feed_health or {}
-
-        return {
-            "is_running": is_healthy,
-            "is_stale": is_stale,
-            "last_heartbeat_seconds_ago": round(seconds_since),
-            "mode": status.mode,
-            "strategy": status.strategy,
-            "last_cycle_at": last_cycle.isoformat() if last_cycle else None,
-            "last_btc_price": float(status.last_btc_price) if status.last_btc_price else None,
-            "last_momentum_pct": float(status.last_momentum_pct) if status.last_momentum_pct else None,
-            "last_volatility": float(status.last_volatility) if status.last_volatility else None,
-            "total_predictions": status.total_predictions,
-            "total_resolved": status.total_resolved,
-            "total_correct": status.total_correct,
-            "brier_mean": float(status.brier_mean) if status.brier_mean else None,
-            "uptime_seconds": status.uptime_seconds,
-            "error_count": status.error_count,
-            "last_error": status.last_error,
-            "feed_health": feed_health,
-        }
 
     async def update_status(self, status: dict[str, Any]) -> None:
         from api.models import BotStatus
-        result = await self.session.execute(select(BotStatus).where(BotStatus.id == 1))
-        db_status = result.scalar_one_or_none()
+        async with self._session() as s:
+            result = await s.execute(select(BotStatus).where(BotStatus.id == 1))
+            db_status = result.scalar_one_or_none()
 
-        if not db_status:
-            db_status = BotStatus(id=1, **status)
-            self.session.add(db_status)
-        else:
-            for key, value in status.items():
-                if hasattr(db_status, key):
-                    setattr(db_status, key, value)
+            if not db_status:
+                db_status = BotStatus(id=1, **status)
+                s.add(db_status)
+            else:
+                for key, value in status.items():
+                    if hasattr(db_status, key):
+                        setattr(db_status, key, value)
 
-        await self.session.flush()
-        await self.session.commit()
+            await s.flush()
 
     async def set_heartbeat(self) -> None:
         await self.update_status({"updated_at": datetime.now(timezone.utc)})
@@ -422,62 +443,70 @@ class PostgresBotStatusRepository(BotStatusRepository):
         """Store feed health in dedicated feed_health JSON column."""
         import json
         from api.models import BotStatus
-        result = await self.session.execute(select(BotStatus).where(BotStatus.id == 1))
-        db_status = result.scalar_one_or_none()
-        if not db_status:
-            return
+        async with self._session() as s:
+            result = await s.execute(select(BotStatus).where(BotStatus.id == 1))
+            db_status = result.scalar_one_or_none()
+            if not db_status:
+                return
 
-        # Read existing feed_health from dedicated column
-        feed_health = db_status.feed_health or {}
-
-        feed_health[feed_name] = {
-            "status": status,
-            "last_message_at": last_message_at.isoformat() if last_message_at else None,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        db_status.feed_health = feed_health
-        await self.session.flush()
-        await self.session.commit()
+            feed_health = db_status.feed_health or {}
+            feed_health[feed_name] = {
+                "status": status,
+                "last_message_at": last_message_at.isoformat() if last_message_at else None,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+            db_status.feed_health = feed_health
+            await s.flush()
 
 
 class PostgresRiskRepository(RiskRepository):
     """PostgreSQL implementation of risk state persistence."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def load_risk_state(self) -> dict[str, Any]:
-        # Risk state could be stored in a dedicated table
-        # For now, we'll use a simple key-value approach
-        result = await self.session.execute(
-            text("SELECT state_json FROM risk_state WHERE id = 1")
-        )
-        row = result.fetchone()
-        if row:
-            import json
-            return json.loads(row[0])
-        return {
-            "consecutive_losses": 0,
-            "cooldown_until": None,
-            "active_market_id": None,
-            "uncertain_market_ids": [],
-            "daily_pnl": "0",
-            "trade_count": 0,
-        }
+        async with self._session() as s:
+            result = await s.execute(
+                text("SELECT state_json FROM risk_state WHERE id = 1")
+            )
+            row = result.fetchone()
+            if row:
+                import json
+                return json.loads(row[0])
+            return {
+                "consecutive_losses": 0,
+                "cooldown_until": None,
+                "active_market_id": None,
+                "uncertain_market_ids": [],
+                "daily_pnl": "0",
+                "trade_count": 0,
+            }
 
     async def save_risk_state(self, state: dict[str, Any]) -> None:
         import json
         state_json = json.dumps(state, sort_keys=True)
-        await self.session.execute(
-            text("""
-                INSERT INTO risk_state (id, state_json, updated_at)
-                VALUES (1, :state_json, :updated_at)
-                ON CONFLICT (id) DO UPDATE SET state_json = :state_json, updated_at = :updated_at
-            """),
-            {"state_json": state_json, "updated_at": datetime.now(timezone.utc)},
-        )
-        await self.session.commit()
+        async with self._session() as s:
+            await s.execute(
+                text("""
+                    INSERT INTO risk_state (id, state_json, updated_at)
+                    VALUES (1, :state_json, :updated_at)
+                    ON CONFLICT (id) DO UPDATE SET state_json = :state_json, updated_at = :updated_at
+                """),
+                {"state_json": state_json, "updated_at": datetime.now(timezone.utc)},
+            )
 
     async def add_uncertain_market(self, market_id: str) -> None:
         state = await self.load_risk_state()
@@ -497,105 +526,117 @@ class PostgresRiskRepository(RiskRepository):
 class PostgresMarketRepository(MarketRepository):
     """PostgreSQL implementation of market state persistence."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def save_active_market(self, market_id: str, event_id: str, metadata: dict[str, Any]) -> None:
         import json
-        await self.session.execute(
-            text("""
-                INSERT INTO active_market (id, market_id, event_id, metadata_json, updated_at)
-                VALUES (1, :market_id, :event_id, :metadata_json, :updated_at)
-                ON CONFLICT (id) DO UPDATE SET
-                    market_id = :market_id,
-                    event_id = :event_id,
-                    metadata_json = :metadata_json,
-                    updated_at = :updated_at
-            """),
-            {
-                "market_id": market_id,
-                "event_id": event_id,
-                "metadata_json": json.dumps(metadata, sort_keys=True),
-                "updated_at": datetime.now(timezone.utc),
-            },
-        )
+        async with self._session() as s:
+            await s.execute(
+                text("""
+                    INSERT INTO active_market (id, market_id, event_id, metadata_json, updated_at)
+                    VALUES (1, :market_id, :event_id, :metadata_json, :updated_at)
+                    ON CONFLICT (id) DO UPDATE SET
+                        market_id = :market_id,
+                        event_id = :event_id,
+                        metadata_json = :metadata_json,
+                        updated_at = :updated_at
+                """),
+                {
+                    "market_id": market_id,
+                    "event_id": event_id,
+                    "metadata_json": json.dumps(metadata, sort_keys=True),
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            )
 
     async def get_active_market(self) -> dict[str, Any] | None:
-        result = await self.session.execute(
-            text("SELECT market_id, event_id, metadata_json FROM active_market WHERE id = 1")
-        )
-        row = result.fetchone()
-        if not row:
-            return None
-        import json
-        return {
-            "market_id": row[0],
-            "event_id": row[1],
-            **json.loads(row[2]),
-        }
+        async with self._session() as s:
+            result = await s.execute(
+                text("SELECT market_id, event_id, metadata_json FROM active_market WHERE id = 1")
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            import json
+            return {
+                "market_id": row[0],
+                "event_id": row[1],
+                **json.loads(row[2]),
+            }
 
     async def clear_active_market(self) -> None:
-        await self.session.execute(text("DELETE FROM active_market WHERE id = 1"))
+        async with self._session() as s:
+            await s.execute(text("DELETE FROM active_market WHERE id = 1"))
 
 
 class PostgresMarketOutcomeRepository(MarketOutcomeRepository):
     """PostgreSQL implementation of immutable market outcomes."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def save_outcome(self, outcome: dict[str, Any]) -> None:
-        await self.session.execute(
-            text("""
-                INSERT INTO market_outcomes
-                    (market_id, event_id, resolved_outcome_id, outcome_resolution,
-                     event_close_value, btc_close_price, resolved_at)
-                VALUES (:market_id, :event_id, :resolved_outcome_id, :outcome_resolution,
-                        :event_close_value, :btc_close_price, :resolved_at)
-                ON CONFLICT (market_id) DO UPDATE SET
-                    resolved_outcome_id = :resolved_outcome_id,
-                    outcome_resolution = :outcome_resolution,
-                    event_close_value = :event_close_value,
-                    btc_close_price = :btc_close_price,
-                    resolved_at = :resolved_at
-            """),
-            {
-                "market_id": outcome["market_id"],
-                "event_id": outcome.get("event_id", ""),
-                "resolved_outcome_id": outcome.get("resolved_outcome_id", ""),
-                "outcome_resolution": outcome.get("outcome_resolution", ""),
-                "event_close_value": outcome.get("event_close_value"),
-                "btc_close_price": outcome.get("btc_close_price"),
-                "resolved_at": outcome.get("resolved_at", datetime.now(timezone.utc)),
-            },
-        )
-        await self.session.commit()
+        async with self._session() as s:
+            await s.execute(
+                text("""
+                    INSERT INTO market_outcomes
+                        (market_id, event_id, resolved_outcome_id, outcome_resolution,
+                         event_close_value, btc_close_price, resolved_at)
+                    VALUES (:market_id, :event_id, :resolved_outcome_id, :outcome_resolution,
+                            :event_close_value, :btc_close_price, :resolved_at)
+                    ON CONFLICT (market_id) DO UPDATE SET
+                        resolved_outcome_id = :resolved_outcome_id,
+                        outcome_resolution = :outcome_resolution,
+                        event_close_value = :event_close_value,
+                        btc_close_price = :btc_close_price,
+                        resolved_at = :resolved_at
+                """),
+                {
+                    "market_id": outcome["market_id"],
+                    "event_id": outcome.get("event_id", ""),
+                    "resolved_outcome_id": outcome.get("resolved_outcome_id", ""),
+                    "outcome_resolution": outcome.get("outcome_resolution", ""),
+                    "event_close_value": outcome.get("event_close_value"),
+                    "btc_close_price": outcome.get("btc_close_price"),
+                    "resolved_at": outcome.get("resolved_at", datetime.now(timezone.utc)),
+                },
+            )
 
     async def get_outcome(self, market_id: str) -> dict[str, Any] | None:
-        result = await self.session.execute(
-            text("SELECT market_id, event_id, resolved_outcome_id, outcome_resolution, event_close_value, btc_close_price, resolved_at FROM market_outcomes WHERE market_id = :market_id"),
-            {"market_id": market_id},
-        )
-        row = result.fetchone()
-        if not row:
-            return None
-        return {
-            "market_id": row[0],
-            "event_id": row[1],
-            "resolved_outcome_id": row[2],
-            "outcome_resolution": row[3],
-            "event_close_value": row[4],
-            "btc_close_price": float(row[5]) if row[5] else None,
-            "resolved_at": row[6].isoformat() if row[6] else None,
-        }
-
-    async def get_outcomes(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-        result = await self.session.execute(
-            text("SELECT market_id, event_id, resolved_outcome_id, outcome_resolution, event_close_value, btc_close_price, resolved_at FROM market_outcomes ORDER BY resolved_at DESC LIMIT :limit OFFSET :offset"),
-            {"limit": limit, "offset": offset},
-        )
-        return [
-            {
+        async with self._session() as s:
+            result = await s.execute(
+                text("SELECT market_id, event_id, resolved_outcome_id, outcome_resolution, event_close_value, btc_close_price, resolved_at FROM market_outcomes WHERE market_id = :market_id"),
+                {"market_id": market_id},
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            return {
                 "market_id": row[0],
                 "event_id": row[1],
                 "resolved_outcome_id": row[2],
@@ -604,50 +645,80 @@ class PostgresMarketOutcomeRepository(MarketOutcomeRepository):
                 "btc_close_price": float(row[5]) if row[5] else None,
                 "resolved_at": row[6].isoformat() if row[6] else None,
             }
-            for row in result.fetchall()
-        ]
+
+    async def get_outcomes(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        async with self._session() as s:
+            result = await s.execute(
+                text("SELECT market_id, event_id, resolved_outcome_id, outcome_resolution, event_close_value, btc_close_price, resolved_at FROM market_outcomes ORDER BY resolved_at DESC LIMIT :limit OFFSET :offset"),
+                {"limit": limit, "offset": offset},
+            )
+            return [
+                {
+                    "market_id": row[0],
+                    "event_id": row[1],
+                    "resolved_outcome_id": row[2],
+                    "outcome_resolution": row[3],
+                    "event_close_value": row[4],
+                    "btc_close_price": float(row[5]) if row[5] else None,
+                    "resolved_at": row[6].isoformat() if row[6] else None,
+                }
+                for row in result.fetchall()
+            ]
 
 
 class PostgresEventLogRepository(EventLogRepository):
     """PostgreSQL implementation of event logging."""
 
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    def __init__(self, session_factory: async_sessionmaker):
+        self._sf = session_factory
+
+    @asynccontextmanager
+    async def _session(self):
+        s = self._sf()
+        try:
+            yield s
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
 
     async def log_event(self, event: str, **fields: Any) -> None:
         import json
-        await self.session.execute(
-            text("""
-                INSERT INTO event_log (event, fields_json, recorded_at)
-                VALUES (:event, :fields_json, :recorded_at)
-            """),
-            {
-                "event": event,
-                "fields_json": json.dumps(fields, sort_keys=True, default=str),
-                "recorded_at": datetime.now(timezone.utc),
-            },
-        )
-        await self.session.commit()
+        async with self._session() as s:
+            await s.execute(
+                text("""
+                    INSERT INTO event_log (event, fields_json, recorded_at)
+                    VALUES (:event, :fields_json, :recorded_at)
+                """),
+                {
+                    "event": event,
+                    "fields_json": json.dumps(fields, sort_keys=True, default=str),
+                    "recorded_at": datetime.now(timezone.utc),
+                },
+            )
 
     async def get_events(
         self, limit: int = 100, event_type: str | None = None
     ) -> list[dict[str, Any]]:
         import json
-        query = "SELECT event, fields_json, recorded_at FROM event_log"
-        params: dict[str, Any] = {"limit": limit}
+        async with self._session() as s:
+            query = "SELECT event, fields_json, recorded_at FROM event_log"
+            params: dict[str, Any] = {"limit": limit}
 
-        if event_type:
-            query += " WHERE event = :event_type"
-            params["event_type"] = event_type
+            if event_type:
+                query += " WHERE event = :event_type"
+                params["event_type"] = event_type
 
-        query += " ORDER BY recorded_at DESC LIMIT :limit"
+            query += " ORDER BY recorded_at DESC LIMIT :limit"
 
-        result = await self.session.execute(text(query), params)
-        return [
-            {
-                "event": row[0],
-                **json.loads(row[1]),
-                "recorded_at": row[2].isoformat() if row[2] else "",
-            }
-            for row in result.fetchall()
-        ]
+            result = await s.execute(text(query), params)
+            return [
+                {
+                    "event": row[0],
+                    **json.loads(row[1]),
+                    "recorded_at": row[2].isoformat() if row[2] else "",
+                }
+                for row in result.fetchall()
+            ]
