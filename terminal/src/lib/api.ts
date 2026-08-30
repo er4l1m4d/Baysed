@@ -1,9 +1,10 @@
 /**
  * API client for the Bayse Bot backend.
- * Uses Vercel rewrite proxy — all requests go through same origin.
+ * REST goes directly to Render (CORS enabled).
+ * WebSocket goes through Vercel rewrite proxy (cross-origin WS doesn't work on Render free tier).
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://baysed.onrender.com";
 
 export interface StatusResponse {
   is_running: boolean;
