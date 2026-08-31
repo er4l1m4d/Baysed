@@ -174,19 +174,33 @@ class Bot:
                 log.info("--- cycle | BTC=$%.2f momentum=%.4f%% vol_ratio=%.2f atr=%.4f%% complete=%s",
                     btc.price, btc.momentum_pct, btc.volume_ratio, btc.atr_pct, btc.complete)
 
-                # Update bot status
-                await self.repos.bot_status.update_status({
-                    "is_running": True,
-                    "last_cycle_at": datetime.now(timezone.utc),
-                    "last_btc_price": btc.price,
-                    "last_momentum_pct": btc.momentum_pct,
-                    "last_volatility": btc.atr_pct,
-                })
+                # Create one session for this cycle (fast: single connection)
+                cycle_session = self.repos._session_factory()
+                self.repos.set_shared_session(cycle_session)
 
                 try:
-                    await asyncio.wait_for(self.scan_once(), timeout=30)
-                except asyncio.TimeoutError:
-                    log.warning("scan_once timed out after 30s")
+                    # Update bot status
+                    await self.repos.bot_status.update_status({
+                        "is_running": True,
+                        "last_cycle_at": datetime.now(timezone.utc),
+                        "last_btc_price": btc.price,
+                        "last_momentum_pct": btc.momentum_pct,
+                        "last_volatility": btc.atr_pct,
+                    })
+
+                    try:
+                        await asyncio.wait_for(self.scan_once(), timeout=30)
+                    except asyncio.TimeoutError:
+                        log.warning("scan_once timed out after 30s")
+
+                    await cycle_session.commit()
+
+                except Exception as exc:
+                    await cycle_session.rollback()
+                    raise
+                finally:
+                    self.repos.clear_shared_session()
+                    await cycle_session.close()
 
                 # Increment cycle counter for diagnostics
                 try:
@@ -197,6 +211,11 @@ class Bot:
 
             except Exception as exc:
                 log.warning("scan_failure: %s: %s", type(exc).__name__, exc)
+                try:
+                    from api.shared import bot_diagnostics
+                    bot_diagnostics["cycles"] += 1
+                except Exception:
+                    pass
                 try:
                     await self.repos.event_log.log_event(
                         EventType.SCAN_FAILURE,

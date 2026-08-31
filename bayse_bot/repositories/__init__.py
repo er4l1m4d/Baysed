@@ -25,6 +25,7 @@ class RepositorySet:
         market: MarketRepository,
         market_outcome: MarketOutcomeRepository,
         event_log: EventLogRepository,
+        session_factory=None,
     ):
         self.predictions = predictions
         self.trades = trades
@@ -33,6 +34,18 @@ class RepositorySet:
         self.market = market
         self.market_outcome = market_outcome
         self.event_log = event_log
+        self._session_factory = session_factory
+
+    def set_shared_session(self, session):
+        """Set a shared session on all repositories (for one scan cycle)."""
+        for repo in [self.predictions, self.trades, self.bot_status,
+                     self.risk, self.market, self.market_outcome, self.event_log]:
+            if hasattr(repo, "set_shared_session"):
+                repo.set_shared_session(session)
+
+    def clear_shared_session(self):
+        """Remove shared session from all repositories."""
+        self.set_shared_session(None)
 
 
 async def create_repositories(database_url: str) -> RepositorySet:
@@ -138,4 +151,5 @@ async def create_repositories(database_url: str) -> RepositorySet:
         market=PostgresMarketRepository(session_factory),
         market_outcome=PostgresMarketOutcomeRepository(session_factory),
         event_log=PostgresEventLogRepository(session_factory),
+        session_factory=session_factory,
     )

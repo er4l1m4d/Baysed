@@ -253,7 +253,8 @@ class BayseMarketFeed:
                                 await on_trade(event_id, msg)
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:
-                log.warning("BayseMarketFeed connection issue: %s (retrying in %ds)", exc, min(backoff, 30))
+                log.warning("BayseMarketFeed connection issue: %s %s (retrying in %ds)",
+                    type(exc).__name__, exc.args or "(no detail)", min(backoff, 30))
                 await asyncio.sleep(min(backoff, 30))
                 backoff = min(backoff * 2, 30)
 

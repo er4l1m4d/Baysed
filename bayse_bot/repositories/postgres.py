@@ -2,12 +2,20 @@
 
 Uses async SQLAlchemy for all database operations.
 Works with Neon, Render Postgres, or any PostgreSQL provider.
+
+Session strategy:
+- Each repository stores the session_factory.
+- Repositories have a _session_ref that can be set to a shared session
+  (for the duration of a scan cycle) or None (create fresh per operation).
+- The engine creates one session per scan cycle, sets it on all repos,
+  and closes it after the cycle. If the cycle fails, the next cycle
+  gets a fresh session.
 """
 from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import select, func, update, Integer, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,28 +26,34 @@ from .interfaces import (
 )
 
 
-def _new_session(factory: async_sessionmaker) -> Callable[[], AsyncSession]:
-    """Return a function that creates a fresh session."""
-    return lambda: factory()
-
-
-class PostgresPredictionRepository(PredictionRepository):
-    """PostgreSQL implementation of prediction persistence."""
+class _SessionMixin:
+    """Mixin providing _session() that uses a shared session if set, else creates fresh."""
 
     def __init__(self, session_factory: async_sessionmaker):
         self._sf = session_factory
+        self._shared: AsyncSession | None = None
 
     @asynccontextmanager
     async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
+        if self._shared is not None:
+            yield self._shared
+        else:
+            s = self._sf()
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+            finally:
+                await s.close()
+
+    def set_shared_session(self, session: AsyncSession | None):
+        self._shared = session
+
+
+class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
+    """PostgreSQL implementation of prediction persistence."""
 
     async def save_prediction(self, prediction: dict[str, Any]) -> None:
         from api.models import Prediction
@@ -247,23 +261,8 @@ class PostgresPredictionRepository(PredictionRepository):
         }
 
 
-class PostgresTradeRepository(TradeRepository):
+class PostgresTradeRepository(_SessionMixin, TradeRepository):
     """PostgreSQL implementation of trade persistence."""
-
-    def __init__(self, session_factory: async_sessionmaker):
-        self._sf = session_factory
-
-    @asynccontextmanager
-    async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
 
     async def save_trade(self, trade: dict[str, Any]) -> int:
         from api.models import TradeRecord
@@ -359,23 +358,8 @@ class PostgresTradeRepository(TradeRepository):
         }
 
 
-class PostgresBotStatusRepository(BotStatusRepository):
+class PostgresBotStatusRepository(_SessionMixin, BotStatusRepository):
     """PostgreSQL implementation of bot status persistence."""
-
-    def __init__(self, session_factory: async_sessionmaker):
-        self._sf = session_factory
-
-    @asynccontextmanager
-    async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
 
     async def get_status(self) -> dict[str, Any]:
         from api.models import BotStatus
@@ -473,23 +457,8 @@ class PostgresBotStatusRepository(BotStatusRepository):
             await s.flush()
 
 
-class PostgresRiskRepository(RiskRepository):
+class PostgresRiskRepository(_SessionMixin, RiskRepository):
     """PostgreSQL implementation of risk state persistence."""
-
-    def __init__(self, session_factory: async_sessionmaker):
-        self._sf = session_factory
-
-    @asynccontextmanager
-    async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
 
     async def load_risk_state(self) -> dict[str, Any]:
         async with self._session() as s:
@@ -537,23 +506,8 @@ class PostgresRiskRepository(RiskRepository):
         await self.save_risk_state(state)
 
 
-class PostgresMarketRepository(MarketRepository):
+class PostgresMarketRepository(_SessionMixin, MarketRepository):
     """PostgreSQL implementation of market state persistence."""
-
-    def __init__(self, session_factory: async_sessionmaker):
-        self._sf = session_factory
-
-    @asynccontextmanager
-    async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
 
     async def save_active_market(self, market_id: str, event_id: str, metadata: dict[str, Any]) -> None:
         import json
@@ -596,23 +550,8 @@ class PostgresMarketRepository(MarketRepository):
             await s.execute(text("DELETE FROM active_market WHERE id = 1"))
 
 
-class PostgresMarketOutcomeRepository(MarketOutcomeRepository):
+class PostgresMarketOutcomeRepository(_SessionMixin, MarketOutcomeRepository):
     """PostgreSQL implementation of immutable market outcomes."""
-
-    def __init__(self, session_factory: async_sessionmaker):
-        self._sf = session_factory
-
-    @asynccontextmanager
-    async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
 
     async def save_outcome(self, outcome: dict[str, Any]) -> None:
         async with self._session() as s:
@@ -680,23 +619,8 @@ class PostgresMarketOutcomeRepository(MarketOutcomeRepository):
             ]
 
 
-class PostgresEventLogRepository(EventLogRepository):
+class PostgresEventLogRepository(_SessionMixin, EventLogRepository):
     """PostgreSQL implementation of event logging."""
-
-    def __init__(self, session_factory: async_sessionmaker):
-        self._sf = session_factory
-
-    @asynccontextmanager
-    async def _session(self):
-        s = self._sf()
-        try:
-            yield s
-            await s.commit()
-        except Exception:
-            await s.rollback()
-            raise
-        finally:
-            await s.close()
 
     async def log_event(self, event: str, **fields: Any) -> None:
         import json
