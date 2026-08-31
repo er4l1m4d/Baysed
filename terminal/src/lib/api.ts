@@ -183,9 +183,8 @@ export function connectWebSocket(
   onPrediction?: (prediction: Prediction) => void,
   onActiveMarket?: (market: LiveMarketState) => void
 ): () => void {
-  // Use same origin — Vercel proxy routes /ws to Render
-  const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/ws`;
+  // Vercel rewrites don't support WebSocket upgrades — connect directly to Render
+  const wsUrl = "wss://baysed.onrender.com/ws";
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let shouldReconnect = true;
