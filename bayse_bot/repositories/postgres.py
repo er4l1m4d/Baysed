@@ -238,6 +238,10 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
             "signal_strength": float(pred.signal_strength),
             "approved": pred.approved,
             "reasons": pred.reasons,
+            "yes_edge": float(pred.yes_edge) if pred.yes_edge else None,
+            "yes_edge_fee": float(pred.yes_edge_fee) if pred.yes_edge_fee else None,
+            "no_edge": float(pred.no_edge) if pred.no_edge else None,
+            "no_edge_fee": float(pred.no_edge_fee) if pred.no_edge_fee else None,
             "strategy_version": pred.strategy_version,
             "experiment_tag": pred.experiment_tag,
             # Timestamps

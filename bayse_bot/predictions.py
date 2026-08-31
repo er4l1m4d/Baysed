@@ -76,11 +76,17 @@ class PredictionRecord:
     probability: Decimal | None = None
     predicted_outcome: str = ""  # "YES" or "NO"
     edge: Decimal | None = None
-    edge_fee: Decimal | None = None  # Fee-adjusted edge
+    edge_fee: Decimal | None = None  # Fee-adjusted edge (selected side)
     bayse_implied: Decimal | None = None  # Bayse market implied probability of predicted outcome
     signal_strength: Decimal = Decimal("0")
     approved: bool = False
     reasons: tuple[str, ...] = ()
+
+    # Both-side edges (for research)
+    yes_edge: Decimal | None = None
+    yes_edge_fee: Decimal | None = None
+    no_edge: Decimal | None = None
+    no_edge_fee: Decimal | None = None
 
     # Metadata
     strategy_version: str = "2"

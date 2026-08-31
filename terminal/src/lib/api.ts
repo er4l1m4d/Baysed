@@ -49,6 +49,11 @@ export interface Prediction {
   signal_strength: number;
   approved: boolean;
   reasons: string[] | null;
+  // Both-side edges (for research)
+  yes_edge: number | null;
+  yes_edge_fee: number | null;
+  no_edge: number | null;
+  no_edge_fee: number | null;
   // Timestamps
   observed_at: string | null;
   decided_at: string | null;

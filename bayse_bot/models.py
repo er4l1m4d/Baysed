@@ -147,15 +147,24 @@ class Decision:
     probability: always P(YES) — the probability of the YES outcome.
     The predicted outcome is derived from probability (>0.5 = YES, <=0.5 = NO).
     For inverted strategies, probability = 1 - base_probability.
+
+    yes_edge/no_edge: raw edges for both sides (for research).
+    yes_edge_fee/no_edge_fee: fee-adjusted edges for both sides.
+    The selected side's edge is also stored in `edge`/`edge_fee` for backward compat.
     """
     strategy: str
     outcome: Outcome | None
     probability: Decimal | None  # Always P(YES), regardless of predicted outcome
-    edge: Decimal | None  # Raw edge: probability - price
-    edge_fee: Decimal | None  # Fee-adjusted edge: probability - break_even_price
+    edge: Decimal | None  # Raw edge for selected side
+    edge_fee: Decimal | None  # Fee-adjusted edge for selected side
     strength: Decimal
     approved: bool
     reasons: tuple[str, ...]
+    # Both-side edges (for research)
+    yes_edge: Decimal | None = None
+    yes_edge_fee: Decimal | None = None
+    no_edge: Decimal | None = None
+    no_edge_fee: Decimal | None = None
 
 
 @dataclass

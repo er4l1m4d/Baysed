@@ -47,6 +47,10 @@ PREDICTION_COLUMNS = [
     ("resolved_outcome_id", "VARCHAR(255)"),
     ("edge_fee", "NUMERIC(10, 6)"),
     ("bayse_implied", "NUMERIC(10, 6)"),
+    ("yes_edge", "NUMERIC(10, 6)"),
+    ("yes_edge_fee", "NUMERIC(10, 6)"),
+    ("no_edge", "NUMERIC(10, 6)"),
+    ("no_edge_fee", "NUMERIC(10, 6)"),
 ]
 
 BOT_STATUS_COLUMNS = [

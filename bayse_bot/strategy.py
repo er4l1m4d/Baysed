@@ -5,6 +5,7 @@ import math
 from .config import Settings
 from .contract import ContractState
 from .models import BTCFeatures, Decision, Outcome
+from .snapshot import MarketSnapshot
 
 # ---------------------------------------------------------------------------
 # Probability helpers
@@ -76,7 +77,7 @@ def probability_from_distance_to_strike(
     return max(Decimal("0.01"), min(Decimal("0.99"), normal_cdf(z)))
 
 # ---------------------------------------------------------------------------
-# Strategy input — now includes ContractState
+# Strategy input — accepts MarketSnapshot or legacy components
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class StrategyInput:
     yes_ask: Decimal
     no_ask: Decimal
     contract: ContractState | None = None
+    snapshot: MarketSnapshot | None = None
 
 # ---------------------------------------------------------------------------
 # Base strategy
@@ -128,18 +130,22 @@ class DistanceToStrikeModel(Strategy):
             contract.seconds_remaining,
         )
 
+        # Compute edges for BOTH sides (for research)
+        p_no = Decimal("1") - probability
+        yes_edge = (probability - x.yes_ask) if x.yes_ask else None
+        no_edge = (p_no - x.no_ask) if x.no_ask else None
+        yes_edge_fee = fee_adjusted_edge(probability, x.yes_ask)
+        no_edge_fee = fee_adjusted_edge(p_no, x.no_ask)
+
         # Signal: YES if probability > 50% (above strike), NO if below
         outcome = Outcome.YES if probability > Decimal("0.5") else Outcome.NO
         price = x.yes_ask if outcome is Outcome.YES else x.no_ask
 
-        # Edge: model probability minus market price (raw)
-        edge = probability - price if price else None
-
-        # Fee-adjusted edge: accounts for Bayse taker fees
-        edge_fee = fee_adjusted_edge(probability, price)
+        # Selected side edge (for backward compat)
+        edge = yes_edge if outcome is Outcome.YES else no_edge
+        edge_fee = yes_edge_fee if outcome is Outcome.YES else no_edge_fee
 
         # Strength: how far z-score is from 0 (normalized)
-        # Volatility is per-60s candle, so scale by remaining time / 60
         time_frac = Decimal(str(contract.seconds_remaining)) / Decimal("60")
         expected_move = contract.realized_volatility * time_frac.sqrt() if time_frac > 0 and contract.realized_volatility > 0 else Decimal("1")
         strength = abs(contract.distance_from_strike_pct) / expected_move if expected_move > 0 else Decimal("0")
@@ -165,6 +171,8 @@ class DistanceToStrikeModel(Strategy):
         return Decision(
             self.name, outcome, probability, edge, edge_fee, strength,
             not reasons, tuple(reasons),
+            yes_edge=yes_edge, yes_edge_fee=yes_edge_fee,
+            no_edge=no_edge, no_edge_fee=no_edge_fee,
         )
 
 # ---------------------------------------------------------------------------

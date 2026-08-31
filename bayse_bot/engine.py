@@ -18,6 +18,7 @@ from .predictions import PredictionRecord, PredictionRecorder
 from .repositories import RepositorySet
 from .resolution import ResolutionTracker
 from .risk import RiskManager
+from .snapshot import MarketSnapshot
 from .strategy import StrategyInput, strategy_by_name
 
 log = logging.getLogger(__name__)
@@ -359,14 +360,17 @@ class Bot:
                         (BookLevel(n_price + spread, Decimal("1")),), now)
                     log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
 
-            # Build contract state
+            # Build contract state (for backward compat with StrategyInput)
             spread = yes.spread
             contract = build_contract_state(market, self.state.btc_features, yes.best_ask, no.best_ask, spread)
-            if contract:
-                log.info("  contract: strike=$%s BTC=$%s dist=%.3f%% above=%s time_left=%ds/%ds",
-                    contract.strike_price, contract.current_btc_price,
-                    contract.distance_from_strike_pct, contract.is_above_strike,
-                    contract.seconds_remaining, contract.seconds_elapsed + contract.seconds_remaining)
+
+            # Build canonical snapshot
+            snapshot = MarketSnapshot.from_market(market, self.state.btc_features, yes, no)
+            if snapshot:
+                log.info("  snapshot: strike=$%s BTC=$%s dist=%.3f%% above=%s time_left=%ds/%ds",
+                    snapshot.strike_price, snapshot.btc_price,
+                    snapshot.distance_from_strike_pct, snapshot.is_above_strike,
+                    snapshot.seconds_remaining, snapshot.seconds_elapsed + snapshot.seconds_remaining)
 
             # Check book quality (skip liquidity check in observation mode — we just want training data)
             reasons = []
@@ -393,7 +397,7 @@ class Bot:
 
             # Evaluate strategy
             decision = self.strategy.evaluate(
-                StrategyInput(self.state.btc_features, yes.best_ask, no.best_ask, contract),
+                StrategyInput(self.state.btc_features, yes.best_ask, no.best_ask, contract, snapshot),
                 self.s,
             )
             risk_reasons = await self.risk.approve(market.market_id)
@@ -426,6 +430,11 @@ class Bot:
                     signal_strength=decision.strength,
                     approved=decision.approved,
                     reasons=tuple(reasons),
+                    # Both-side edges (for research)
+                    yes_edge=decision.yes_edge,
+                    yes_edge_fee=decision.yes_edge_fee,
+                    no_edge=decision.no_edge,
+                    no_edge_fee=decision.no_edge_fee,
                     # Timestamps
                     observed_at=now,
                     decided_at=now,

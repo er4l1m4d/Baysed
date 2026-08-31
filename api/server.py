@@ -88,6 +88,11 @@ class PredictionResponse(BaseModel):
     signal_strength: float
     approved: bool
     reasons: list[str] | None
+    # Both-side edges (for research)
+    yes_edge: float | None = None
+    yes_edge_fee: float | None = None
+    no_edge: float | None = None
+    no_edge_fee: float | None = None
     # Timestamps
     observed_at: str | None = None
     decided_at: str | None = None
