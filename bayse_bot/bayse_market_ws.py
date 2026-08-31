@@ -196,15 +196,35 @@ class BayseMarketFeed:
         on_price: Callable[[str, dict], Awaitable[None]] | None = None,
         on_trade: Callable[[str, dict], Awaitable[None]] | None = None,
     ) -> None:
-        """Main WS loop. Reconnects on failure with exponential backoff."""
+        """Main WS loop. Reconnects on failure with exponential backoff.
+
+        Bayse server pings every ~54s. We disable client-side pings
+        (ping_interval=None) and set recv timeout to 70s (>54s) so we
+        don't timeout before the server's ping arrives.
+        """
         backoff = 1
         while not stop.is_set():
             try:
+                # ping_interval=None: let server handle keepalive (every ~54s)
+                # recv timeout 70s > server's 54s ping interval
                 async with websockets.connect(
-                    BAYSE_MARKET_WS, ping_interval=20, ping_timeout=20,
+                    BAYSE_MARKET_WS, ping_interval=None,
                 ) as ws:
+                    # Wait for Bayse 'connected' message (up to 10s)
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                        for line in raw.split("\n"):
+                            if not line.strip():
+                                continue
+                            msg = json.loads(line)
+                            if msg.get("type") == "connected":
+                                log.info("BayseMarketFeed connected (clientId=%s)", msg.get("clientId", "?"))
+                            else:
+                                log.debug("BayseMarketFeed initial msg: %s", msg.get("type"))
+                    except asyncio.TimeoutError:
+                        log.warning("BayseMarketFeed: no 'connected' message within 10s")
+
                     backoff = 1
-                    log.info("BayseMarketFeed connected")
 
                     # Re-subscribe after reconnect
                     for event_id in self.subscribed_events:
@@ -213,7 +233,8 @@ class BayseMarketFeed:
                         await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": [market_id]}))
 
                     while not stop.is_set():
-                        raw = await asyncio.wait_for(ws.recv(), timeout=35)
+                        # 70s timeout > server's 54s ping interval
+                        raw = await asyncio.wait_for(ws.recv(), timeout=70)
                         self.last_message_at = datetime.now(timezone.utc)
 
                         for line in raw.split("\n"):
@@ -251,6 +272,9 @@ class BayseMarketFeed:
                                 # Update canonical store
                                 self.store.add_trade(event_id, msg)
                                 await on_trade(event_id, msg)
+
+                            elif msg_type == "error":
+                                log.warning("BayseMarketFeed server error: %s", data.get("message", data))
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:
                 log.warning("BayseMarketFeed connection issue: %s %s (retrying in %ds)",
