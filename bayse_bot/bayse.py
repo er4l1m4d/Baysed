@@ -21,8 +21,15 @@ def canonical_json_bytes(body: dict[str, Any]) -> bytes:
     return json.dumps(body, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
 
 def sign_request(secret: str, timestamp: int, method: str, path: str, body: bytes | None = None) -> str:
+    """HMAC-SHA256 signature per Bayse docs: {timestamp}.{METHOD}.{path}.{bodyHash}
+
+    path is the URL path WITHOUT query parameters.
+    bodyHash is SHA-256 hex digest of body bytes, or empty string if no body.
+    """
+    # Strip query params from path for signing (Bayse docs: path is just the endpoint)
+    signing_path = path.split("?")[0] if "?" in path else path
     body_hash = hashlib.sha256(body).hexdigest() if body else ""
-    payload = f"{timestamp}.{method.upper()}.{path}.{body_hash}".encode()
+    payload = f"{timestamp}.{method.upper()}.{signing_path}.{body_hash}".encode()
     return base64.b64encode(hmac.new(secret.encode(), payload, hashlib.sha256).digest()).decode()
 
 def _d(v: Any, default: str = "0") -> Decimal: return Decimal(str(v if v is not None else default))

@@ -255,7 +255,7 @@ class BayseMarketFeed:
                     for event_id in self.subscribed_events:
                         await ws.send(json.dumps({"type": "subscribe", "channel": "prices", "eventId": event_id}))
                     for market_id in self.subscribed_markets:
-                        await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": [market_id]}))
+                        await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": [market_id], "currency": "USD"}))
 
                     while not stop.is_set():
                         # 70s timeout > server's 54s ping interval
@@ -320,7 +320,7 @@ class BayseMarketFeed:
         for mid in market_ids:
             if mid not in self.subscribed_markets:
                 self.subscribed_markets.add(mid)
-        await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": market_ids}))
+        await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": market_ids, "currency": "USD"}))
 
     async def subscribe_activity(self, ws, event_id: str) -> None:
         """Subscribe to trade activity for an event."""
