@@ -1,6 +1,6 @@
 "use client";
 
-import { useCalibration, useBotStatus } from "@/hooks/useBayseData";
+import { useCalibration } from "@/hooks/useBayseData";
 
 function CalibrationChart({ curve }: { curve: { bucket: string; count: number; avg_predicted: number; actual_rate: number; gap: number }[] }) {
   if (!curve || curve.length === 0) {
@@ -70,20 +70,6 @@ function MetricsGrid() {
           <div className="text-xs text-gray-500 mb-1">{m.label}</div>
           <div className={`text-xl font-bold ${m.status === "good" ? "text-emerald-400" : m.status === "bad" ? "text-red-400" : "text-white"}`}>{m.value}</div>
           <div className="text-xs text-gray-500 mt-1">{m.desc}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-              m.status === "good"
-                ? "bg-emerald-900 text-emerald-400"
-                : m.status === "warning"
-                  ? "bg-yellow-900 text-yellow-400"
-                  : "bg-gray-800 text-gray-400"
-            }`}
-          >
-            {m.status === "good" ? "Good" : m.status === "warning" ? "Warning" : "Info"}
-          </div>
         </div>
       ))}
     </div>
