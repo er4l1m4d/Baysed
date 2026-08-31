@@ -555,7 +555,7 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
         row = baseline_result.fetchone()
         brier_model = float(row[0]) if row and row[0] else None
         brier_market = float(row[1]) if row and row[1] else None
-        brier_baseline = float(row[2]) if row and row[2] else None
+        brier_baseline = 0.25  # Always-predict-50% baseline is a mathematical constant
         edge_vs_market = (brier_market - brier_model) if brier_model is not None and brier_market is not None else None
 
         # Calibration by time-to-expiry buckets
@@ -616,7 +616,7 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
             accuracy=None, brier_mean=None, calibration_curve=[],
             total_snapshots=0, total_predictions=0, total_signals=0,
             prediction_coverage=None, signal_coverage=None,
-            brier_model=None, brier_market=None, brier_baseline=None,
+            brier_model=None, brier_market=None, brier_baseline=0.25,
             edge_vs_market=None, calibration_by_expiry=[],
         )
 

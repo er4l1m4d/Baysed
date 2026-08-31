@@ -7,7 +7,10 @@ function CalibrationChart({ curve }: { curve: { bucket: string; count: number; a
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-4">Calibration Curve</h3>
-        <div className="text-center text-gray-500 py-8">No calibration data yet</div>
+        <div className="text-center text-gray-500 py-8">
+          <div className="text-sm">No resolved predictions yet</div>
+          <div className="text-xs mt-1 text-gray-600">Calibration data appears once predictions resolve against BTC price</div>
+        </div>
       </div>
     );
   }
@@ -54,13 +57,16 @@ function CalibrationChart({ curve }: { curve: { bucket: string; count: number; a
 function MetricsGrid() {
   const { calibration } = useCalibration();
 
+  const resolved = calibration?.resolved || 0;
+  const hasResolved = resolved > 0;
+
   const metrics = [
-    { label: "Model Brier", value: calibration?.brier_model ? calibration.brier_model.toFixed(4) : "--", status: "neutral", desc: "Baysed model (lower = better)" },
-    { label: "Market Brier", value: calibration?.brier_market ? calibration.brier_market.toFixed(4) : "--", status: "neutral", desc: "Bayse implied probability" },
-    { label: "50% Baseline", value: calibration?.brier_baseline ? calibration.brier_baseline.toFixed(4) : "--", status: "neutral", desc: "Always-predict-50% baseline" },
-    { label: "Edge vs Market", value: calibration?.edge_vs_market != null ? `${calibration.edge_vs_market > 0 ? "+" : ""}${calibration.edge_vs_market.toFixed(4)}` : "--", status: calibration?.edge_vs_market && calibration.edge_vs_market > 0 ? "good" : "bad", desc: "Positive = model beats market" },
-    { label: "Resolved", value: String(calibration?.resolved || 0), status: "neutral", desc: `${calibration?.total || 0} total predictions` },
-    { label: "Signal Coverage", value: calibration?.signal_coverage != null ? `${(calibration.signal_coverage * 100).toFixed(1)}%` : "--", status: "neutral", desc: `${calibration?.total_signals || 0} of ${calibration?.total_predictions || 0} predictions` },
+    { label: "Model Brier", value: hasResolved ? calibration!.brier_model!.toFixed(4) : "--", status: "neutral" as const, desc: hasResolved ? "Baysed model (lower = better)" : `Awaiting ${resolved}/${calibration?.total || 0} resolved` },
+    { label: "Market Brier", value: hasResolved ? calibration!.brier_market!.toFixed(4) : "--", status: "neutral" as const, desc: hasResolved ? "Bayse implied probability" : "Bayse market baseline" },
+    { label: "50% Baseline", value: "0.2500", status: "neutral" as const, desc: "Always-predict-50% (constant)" },
+    { label: "Edge vs Market", value: hasResolved ? `${calibration!.edge_vs_market! > 0 ? "+" : ""}${calibration!.edge_vs_market!.toFixed(4)}` : "--", status: (hasResolved && calibration!.edge_vs_market! > 0) ? "good" as const : "bad" as const, desc: hasResolved ? "Positive = model beats market" : "Requires resolved predictions" },
+    { label: "Resolved", value: String(resolved), status: "neutral" as const, desc: `${calibration?.total || 0} total predictions` },
+    { label: "Signal Coverage", value: calibration?.signal_coverage != null ? `${(calibration.signal_coverage * 100).toFixed(1)}%` : "--", status: "neutral" as const, desc: `${calibration?.total_signals || 0} of ${calibration?.total_predictions || 0} approved` },
   ];
 
   return (
@@ -91,9 +97,9 @@ export default function Analytics() {
           <CalibrationChart curve={calibration?.calibration_curve || []} />
 
           {/* Calibration by Time-to-Expiry */}
-          {calibration?.calibration_by_expiry && calibration.calibration_by_expiry.length > 0 && (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-              <h3 className="text-lg font-semibold mb-4">Calibration by Time-to-Expiry</h3>
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+            <h3 className="text-lg font-semibold mb-4">Calibration by Time-to-Expiry</h3>
+            {calibration?.calibration_by_expiry && calibration.calibration_by_expiry.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -132,8 +138,13 @@ export default function Analytics() {
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="text-center text-gray-500 py-6">
+                <div className="text-sm">No expiry data yet</div>
+                <div className="text-xs mt-1 text-gray-600">Shows how model accuracy varies by time remaining in the 15-min window</div>
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>
