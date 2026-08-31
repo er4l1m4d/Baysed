@@ -169,17 +169,17 @@ class Bot:
         self._last_market_closes_at = None
 
         while not stop.is_set():
-            try:
-                btc = self.state.btc_features
-                log.info("--- cycle | BTC=$%.2f momentum=%.4f%% vol_ratio=%.2f atr=%.4f%% complete=%s",
-                    btc.price, btc.momentum_pct, btc.volume_ratio, btc.atr_pct, btc.complete)
+            btc = self.state.btc_features
+            log.info("--- cycle | BTC=$%.2f momentum=%.4f%% vol_ratio=%.2f atr=%.4f%% complete=%s",
+                btc.price, btc.momentum_pct, btc.volume_ratio, btc.atr_pct, btc.complete)
 
-                # Create one session for this cycle (fast: single connection)
+            # Each attempt gets its own session. On failure, we abandon it entirely
+            # (close + discard) and create a fresh one next attempt. This prevents
+            # "prepared" state corruption from leaking between cycles.
+            for attempt in range(3):
                 cycle_session = self.repos._session_factory()
                 self.repos.set_shared_session(cycle_session)
-
                 try:
-                    # Update bot status
                     await self.repos.bot_status.update_status({
                         "is_running": True,
                         "last_cycle_at": datetime.now(timezone.utc),
@@ -188,42 +188,43 @@ class Bot:
                         "last_volatility": btc.atr_pct,
                     })
 
-                    try:
-                        await asyncio.wait_for(self.scan_once(), timeout=30)
-                    except asyncio.TimeoutError:
-                        log.warning("scan_once timed out after 30s")
-
+                    await asyncio.wait_for(self.scan_once(), timeout=25)
                     await cycle_session.commit()
+                    break  # success
 
+                except asyncio.TimeoutError:
+                    log.warning("scan_once timed out (attempt %d/3)", attempt + 1)
                 except Exception as exc:
-                    await cycle_session.rollback()
-                    raise
+                    log.warning("scan_failure (attempt %d/3): %s: %s", attempt + 1, type(exc).__name__, exc)
                 finally:
                     self.repos.clear_shared_session()
-                    await cycle_session.close()
+                    try:
+                        await cycle_session.close()
+                    except Exception:
+                        pass
 
-                # Increment cycle counter for diagnostics
+                # Wait before retrying (don't hammer the DB)
                 try:
-                    from api.shared import bot_diagnostics
-                    bot_diagnostics["cycles"] += 1
-                except Exception:
+                    await asyncio.wait_for(stop.wait(), timeout=5)
+                except asyncio.TimeoutError:
                     pass
-
-            except Exception as exc:
-                log.warning("scan_failure: %s: %s", type(exc).__name__, exc)
-                try:
-                    from api.shared import bot_diagnostics
-                    bot_diagnostics["cycles"] += 1
-                except Exception:
-                    pass
+            else:
+                # All 3 attempts failed
                 try:
                     await self.repos.event_log.log_event(
                         EventType.SCAN_FAILURE,
-                        error=type(exc).__name__,
-                        detail=str(exc),
+                        error="all_attempts_failed",
+                        detail="3 consecutive scan failures",
                     )
                 except Exception:
                     pass
+
+            # Increment cycle counter
+            try:
+                from api.shared import bot_diagnostics
+                bot_diagnostics["cycles"] += 1
+            except Exception:
+                pass
 
             # Adaptive interval based on market lifecycle
             adaptive_interval = self._adaptive_interval()
