@@ -335,10 +335,14 @@ async def get_live_state(db: AsyncSession = Depends(get_db)):
     """
     live_price = float(shared_state.btc_price) if shared_state.btc_price else None
 
-    # Get the most recent prediction (closest to current market state)
+    # Get the most recent prediction on a market that is still open
+    now = datetime.now(timezone.utc)
     result = await db.execute(
         select(Prediction)
-        .where(Prediction.outcome_resolution == "pending")
+        .where(
+            Prediction.outcome_resolution == "pending",
+            Prediction.closes_at > now,
+        )
         .order_by(Prediction.recorded_at.desc())
         .limit(1)
     )
@@ -348,7 +352,6 @@ async def get_live_state(db: AsyncSession = Depends(get_db)):
         return LiveMarketResponse(btc_price=live_price, is_active=False)
 
     # Calculate live seconds remaining from closes_at
-    now = datetime.now(timezone.utc)
     seconds_remaining = None
     if latest.closes_at:
         seconds_remaining = max(0, int((latest.closes_at - now).total_seconds()))
