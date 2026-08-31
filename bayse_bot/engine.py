@@ -237,19 +237,37 @@ class Bot:
                 pass
 
     async def _check_resolutions(self) -> None:
-        """Check for resolved predictions and update records."""
+        """Check for resolved predictions and update records.
+
+        Two-phase resolution:
+        1. Bayse API resolved events (canonical, uses resolvedOutcomeId)
+        2. Aged-out predictions (closes_at in past, not in latest API batch — resolved via BTC vs strike)
+        """
         try:
+            # Phase 1: Match against Bayse resolved events (canonical source)
+            resolved_count = 0
+            resolved_market_ids: list[str] = []
+
             resolved_events = await self.client.resolved_events(self.s.series_slug)
-            if not resolved_events:
-                log.debug("no resolved events from Bayse API")
-                return
+            if resolved_events:
+                log.info("resolution check: %d resolved events from Bayse", len(resolved_events))
+                resolved_count, resolved_market_ids = await self.resolver.resolve_from_events(resolved_events)
+                if resolved_count > 0:
+                    log.info("resolved %d predictions via resolvedOutcomeId", resolved_count)
 
-            log.info("resolution check: %d resolved events from Bayse", len(resolved_events))
-            resolved_count, resolved_market_ids = await self.resolver.resolve_from_events(resolved_events)
+            # Phase 2: Resolve aged-out predictions not in the API batch
+            # (fell off pagination, or API returned fewer than all historical resolved markets)
+            btc = self.state.btc_features
+            if btc and btc.complete:
+                btc_price = Decimal(str(btc.price))
+                aged_count, aged_market_ids = await self.resolver.resolve_aged_out_predictions(btc_price)
+                if aged_count > 0:
+                    resolved_count += aged_count
+                    resolved_market_ids.extend(aged_market_ids)
+                    log.info("resolved %d aged-out predictions via btc_vs_strike", aged_count)
+
+            # Post-resolution: calibration stats and risk manager
             if resolved_count > 0:
-                log.info("resolved %d predictions", resolved_count)
-
-                # Log calibration stats periodically
                 stats = await self.resolver.calibration_stats()
                 if stats["resolved"] > 0:
                     log.info("calibration: %d/%d resolved brier_mean=%s",
@@ -262,7 +280,7 @@ class Bot:
                     await self.risk.closed(pnl)
                     log.info("risk: closed active position %s pnl=%s", active_id, pnl)
             else:
-                log.info("resolution: %d resolved events but 0 predictions matched", len(resolved_events))
+                log.info("resolution: nothing resolved (events=%d)", len(resolved_events) if resolved_events else 0)
 
         except Exception as exc:
             log.warning("resolution_check_failed: %s: %s", type(exc).__name__, exc)

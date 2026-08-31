@@ -12,6 +12,10 @@ The MarketOutcome is the canonical resolution record — once saved, it never
 changes. Predictions reference it via market_id for calibration.
 
 Resolution is transactional: BEGIN, save outcome, update prediction, COMMIT.
+
+Additionally, for predictions on markets whose closes_at is in the past but
+that don't appear in the latest resolved events batch (aged out of API pagination),
+we resolve using BTC price at close time vs strike price (same source Bayse uses).
 """
 from __future__ import annotations
 import logging
@@ -138,6 +142,95 @@ class ResolutionTracker:
             resolved_market_ids.append(market_id)
             log.info("resolved: %s | predicted=%s actual=%s correct=%s brier=%.4f source=resolvedOutcomeId",
                 record.get("title", "")[:30], predicted, actual_won, was_correct, brier_score)
+
+        return resolved_count, resolved_market_ids
+
+    async def resolve_aged_out_predictions(self, btc_price: Decimal) -> tuple[int, list[str]]:
+        """Resolve predictions on markets whose closes_at is in the past
+        but that weren't found in the latest resolved events batch.
+
+        Uses BTC price at close time vs strike price (same resolution source as Bayse).
+        This handles the case where old predictions have fallen off the API's
+        resolved events pagination.
+        """
+        resolved_count = 0
+        resolved_market_ids = []
+
+        try:
+            # Get all pending predictions
+            all_pending = await self.prediction_repo.get_pending_predictions()
+            now = datetime.now(timezone.utc)
+
+            for record in all_pending:
+                market_id = record.get("market_id")
+                closes_at_str = record.get("closes_at")
+                if not market_id or not closes_at_str:
+                    continue
+
+                # Parse closes_at
+                try:
+                    if isinstance(closes_at_str, str):
+                        closes_at = datetime.fromisoformat(closes_at_str.replace("Z", "+00:00"))
+                    else:
+                        closes_at = closes_at_str
+                except Exception:
+                    continue
+
+                # Skip if market hasn't closed yet (with 60s buffer for API lag)
+                if closes_at > now or (now - closes_at).total_seconds() < 60:
+                    continue
+
+                # Skip if already resolved
+                outcome = await self.outcome_repo.get_outcome(market_id)
+                if outcome:
+                    continue
+
+                # Determine resolution from BTC price vs strike
+                strike_price = Decimal(str(record.get("strike_price", 0)))
+                if strike_price <= 0:
+                    continue
+
+                # YES wins if BTC closed above strike
+                yes_won = btc_price >= strike_price
+                outcome_resolution = PredictionOutcome.YES_WON.value if yes_won else PredictionOutcome.NO_WON.value
+
+                # Save MarketOutcome
+                await self.outcome_repo.save_outcome({
+                    "market_id": market_id,
+                    "event_id": record.get("event_id", ""),
+                    "resolved_outcome_id": "",  # Not available from API
+                    "outcome_resolution": outcome_resolution,
+                    "event_close_value": str(btc_price),
+                    "btc_close_price": btc_price,
+                    "resolved_at": now,
+                })
+
+                # Calculate Brier score
+                probability = Decimal(str(record.get("probability", 0.5)))
+                actual_binary = Decimal("1") if yes_won else Decimal("0")
+                brier_score = (probability - actual_binary) ** 2
+
+                # Determine correctness
+                predicted = record.get("predicted_outcome", "")
+                was_correct = predicted == outcome_resolution
+
+                # Update the LATEST prediction snapshot
+                await self.prediction_repo.update_resolution(
+                    market_id=market_id,
+                    outcome_resolution=outcome_resolution,
+                    actual_price=btc_price,
+                    prediction_correct=was_correct,
+                    brier_score=brier_score,
+                    resolved_outcome_id="",
+                )
+
+                resolved_count += 1
+                resolved_market_ids.append(market_id)
+                log.info("resolved_aged: %s | predicted=%s actual=%s correct=%s brier=%.4f source=btc_vs_strike",
+                    record.get("title", "")[:30], predicted, outcome_resolution, was_correct, brier_score)
+
+        except Exception as exc:
+            log.warning("resolve_aged_out failed: %s: %s", type(exc).__name__, exc)
 
         return resolved_count, resolved_market_ids
 
