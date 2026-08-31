@@ -47,22 +47,26 @@ def probability_from_distance_to_strike(
     distance_pct: Decimal,
     volatility_pct: Decimal,
     seconds_remaining: int,
-    total_duration: int = 900,
+    candle_window_seconds: int = 60,
 ) -> Decimal:
     """Volatility-adjusted distance-to-strike probability model.
 
     z = distance / expected_move
-    expected_move = volatility * sqrt(time_remaining / total_duration)
+    expected_move = volatility * sqrt(time_remaining / candle_window_seconds)
+
+    Volatility is measured per-candle (60s ATR), so we scale by the ratio
+    of remaining time to the candle period, not the full contract duration.
+
     P(above strike) = normal_cdf(z)
 
     When BTC is above strike, z > 0 -> probability > 50%.
     When BTC is below strike, z < 0 -> probability < 50%.
     """
-    if volatility_pct <= 0 or total_duration <= 0:
+    if volatility_pct <= 0 or candle_window_seconds <= 0:
         # No volatility data: fall back to distance-only estimate
         return max(Decimal("0.01"), min(Decimal("0.99"), Decimal("0.5") + distance_pct * Decimal("4")))
 
-    time_frac = Decimal(str(seconds_remaining)) / Decimal(str(total_duration))
+    time_frac = Decimal(str(seconds_remaining)) / Decimal(str(candle_window_seconds))
     expected_move = volatility_pct * time_frac.sqrt() if time_frac > 0 else volatility_pct
 
     if expected_move <= 0:
@@ -135,7 +139,8 @@ class DistanceToStrikeModel(Strategy):
         edge_fee = fee_adjusted_edge(probability, price)
 
         # Strength: how far z-score is from 0 (normalized)
-        time_frac = Decimal(str(contract.seconds_remaining)) / Decimal("900")
+        # Volatility is per-60s candle, so scale by remaining time / 60
+        time_frac = Decimal(str(contract.seconds_remaining)) / Decimal("60")
         expected_move = contract.realized_volatility * time_frac.sqrt() if time_frac > 0 and contract.realized_volatility > 0 else Decimal("1")
         strength = abs(contract.distance_from_strike_pct) / expected_move if expected_move > 0 else Decimal("0")
 

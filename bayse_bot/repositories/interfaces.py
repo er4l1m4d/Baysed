@@ -109,6 +109,11 @@ class TradeRepository(ABC):
         """Get trades with status='unknown' that need reconciliation."""
         ...
 
+    @abstractmethod
+    async def get_trade_by_market(self, market_id: str) -> dict[str, Any] | None:
+        """Get the most recent trade for a specific market."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Bot Status Repository

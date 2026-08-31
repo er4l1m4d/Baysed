@@ -224,7 +224,7 @@ class Bot:
                 return
 
             log.info("resolution check: %d resolved events from Bayse", len(resolved_events))
-            resolved_count = await self.resolver.resolve_from_events(resolved_events)
+            resolved_count, resolved_market_ids = await self.resolver.resolve_from_events(resolved_events)
             if resolved_count > 0:
                 log.info("resolved %d predictions", resolved_count)
 
@@ -233,11 +233,55 @@ class Bot:
                 if stats["resolved"] > 0:
                     log.info("calibration: %d/%d resolved brier_mean=%s",
                         stats["resolved"], stats["total"], stats["brier_mean"])
+
+                # Close risk manager position if the resolved market was active
+                active_id = self.risk.state.active_market_id
+                if active_id and active_id in resolved_market_ids:
+                    pnl = await self._compute_resolution_pnl(active_id)
+                    await self.risk.closed(pnl)
+                    log.info("risk: closed active position %s pnl=%s", active_id, pnl)
             else:
                 log.info("resolution: %d resolved events but 0 predictions matched", len(resolved_events))
 
         except Exception as exc:
             log.warning("resolution_check_failed: %s: %s", type(exc).__name__, exc)
+
+    async def _compute_resolution_pnl(self, market_id: str) -> Decimal | None:
+        """Compute PnL for a resolved market from the trades table.
+
+        Returns (payout - cost) for the trade, or None if no trade found.
+        Binary market: payout = amount / price if won, 0 if lost.
+        """
+        try:
+            trade = await self.repos.trades.get_trade_by_market(market_id)
+            if not trade:
+                log.warning("resolution: no trade found for market %s", market_id)
+                return None
+
+            # Get the outcome resolution
+            outcome = await self.repos.market_outcome.get_outcome(market_id)
+            if not outcome:
+                log.warning("resolution: no outcome found for market %s", market_id)
+                return None
+
+            trade_outcome = trade.get("outcome", "")
+            resolved_won = outcome.get("outcome_resolution", "")
+
+            # Trade wins if our outcome matches the resolved outcome
+            won = trade_outcome == resolved_won
+            amount = Decimal(str(trade.get("amount", 0)))
+            price = Decimal(str(trade.get("price", 0)))
+
+            if price <= 0:
+                return None
+
+            payout = amount / price if won else Decimal("0")
+            pnl = payout - amount
+            return pnl
+
+        except Exception as exc:
+            log.warning("pnl_computation_failed: %s: %s", market_id, exc)
+            return None
 
     async def evaluate_market(self, market: Market) -> None:
         """Evaluate a single market for trading opportunity.

@@ -32,10 +32,10 @@ class ResolutionTracker:
         self.prediction_repo = prediction_repo
         self.outcome_repo = outcome_repo
 
-    async def resolve_from_events(self, resolved_events: list[dict[str, Any]]) -> int:
+    async def resolve_from_events(self, resolved_events: list[dict[str, Any]]) -> tuple[int, list[str]]:
         """Match resolved events against pending predictions.
 
-        Returns count of newly resolved predictions.
+        Returns (count of newly resolved predictions, list of resolved market IDs).
         Uses resolvedOutcomeId as canonical resolution source.
 
         For each resolved market:
@@ -44,7 +44,7 @@ class ResolutionTracker:
         - Leave older snapshots as historical records
         """
         if not resolved_events:
-            return 0
+            return 0, []
 
         # Build lookup: market_id -> resolved event data
         market_resolution: dict[str, dict[str, Any]] = {}
@@ -67,7 +67,7 @@ class ResolutionTracker:
 
         if not market_resolution:
             log.info("resolution: no markets with resolvedOutcomeId in resolved events")
-            return 0
+            return 0, []
 
         # Only fetch pending predictions for resolved markets (not all pending)
         pending = await self.prediction_repo.get_pending_predictions_for_markets(
@@ -78,6 +78,7 @@ class ResolutionTracker:
 
         # Match against pending predictions
         resolved_count = 0
+        resolved_market_ids = []
 
         for record in pending:
             market_id = record.get("market_id")
@@ -134,10 +135,11 @@ class ResolutionTracker:
             )
 
             resolved_count += 1
+            resolved_market_ids.append(market_id)
             log.info("resolved: %s | predicted=%s actual=%s correct=%s brier=%.4f source=resolvedOutcomeId",
                 record.get("title", "")[:30], predicted, actual_won, was_correct, brier_score)
 
-        return resolved_count
+        return resolved_count, resolved_market_ids
 
     async def calibration_stats(self) -> dict[str, Any]:
         """Get calibration statistics from repository."""

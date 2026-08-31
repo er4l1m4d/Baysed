@@ -325,6 +325,20 @@ class PostgresTradeRepository(TradeRepository):
             )
             return [self._to_dict(t) for t in result.scalars().all()]
 
+    async def get_trade_by_market(self, market_id: str) -> dict[str, Any] | None:
+        from api.models import TradeRecord
+        async with self._session() as s:
+            result = await s.execute(
+                select(TradeRecord)
+                .where(TradeRecord.market_id == market_id)
+                .order_by(TradeRecord.recorded_at.desc())
+                .limit(1)
+            )
+            trade = result.scalar_one_or_none()
+            if not trade:
+                return None
+            return self._to_dict(trade)
+
     def _to_dict(self, trade) -> dict[str, Any]:
         return {
             "id": trade.id,
