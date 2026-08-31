@@ -15,7 +15,6 @@ from bayse_bot.models import (
     Market, BTCFeatures, OrderBook, BookLevel, Outcome, Decision,
 )
 from bayse_bot.snapshot import MarketSnapshot
-from bayse_bot.contract import build_contract_state
 from bayse_bot.predictions import PredictionRecord, PredictionOutcome, outcome_from_bayse_resolved
 from bayse_bot.strategy import (
     DistanceToStrikeModel, StrategyInput, Strategy,
@@ -144,9 +143,8 @@ class TestDualEdge:
         yes, no = _make_books(yes_ask=Decimal("0.65"), no_ask=Decimal("0.38"))
 
         snap = MarketSnapshot.from_market(market, btc, yes, no)
-        contract = build_contract_state(market, btc, yes.best_ask, no.best_ask, yes.spread)
 
-        x = StrategyInput(btc, yes.best_ask, no.best_ask, contract, snap)
+        x = StrategyInput(snap)
         decision = strategy.evaluate(x, settings)
 
         # Decision should have both-side edges
@@ -173,9 +171,8 @@ class TestDualEdge:
         yes, no = _make_books()
 
         snap = MarketSnapshot.from_market(market, btc, yes, no)
-        contract = build_contract_state(market, btc, yes.best_ask, no.best_ask, yes.spread)
 
-        x = StrategyInput(btc, yes.best_ask, no.best_ask, contract, snap)
+        x = StrategyInput(snap)
         decision = strategy.evaluate(x, settings)
 
         if decision.outcome is Outcome.YES:

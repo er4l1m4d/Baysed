@@ -90,7 +90,9 @@ class PredictionRecord:
 
     # Metadata
     strategy_version: str = "2"
-    experiment_tag: str = "distance_to_strike_v1"
+    experiment_tag: str = "distance_to_strike_v2"
+    model_version: str = "distance_to_strike_v2"
+    run_id: str = ""
 
     # Timestamps (multi-granularity)
     observed_at: datetime = None      # when market was first seen in scan
@@ -111,6 +113,7 @@ class PredictionRecord:
     actual_price: Decimal | None = None  # BTC price at resolution
     resolved_at: datetime | None = None
     resolved_outcome_id: str | None = None  # raw Bayse value for audit trail
+    resolution_source: str = ""  # "bayse_api" or "btc_vs_strike"
 
     def __post_init__(self):
         now = datetime.now(timezone.utc)
@@ -157,11 +160,12 @@ class PredictionRecorder:
         prediction_correct: bool | None = None,
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
+        resolution_source: str = "",
     ) -> None:
         """Update prediction with resolution data."""
         await self.repository.update_resolution(
             market_id, outcome_resolution, actual_price,
-            prediction_correct, brier_score, resolved_outcome_id,
+            prediction_correct, brier_score, resolved_outcome_id, resolution_source,
         )
 
     async def get_calibration_stats(self) -> dict[str, Any]:

@@ -10,7 +10,7 @@ from decimal import Decimal
 from .bayse import BayseClient, parse_book, parse_quote
 from .bayse_market_ws import BayseMarketFeed
 from .config import Settings
-from .contract import ContractState, build_contract_state
+
 from .feed import MarketState
 from .market import adapt_market, validate_market
 from .models import BTCFeatures, BookLevel, Market, OrderBook, Outcome, RunMode, EventType
@@ -68,6 +68,9 @@ class Bot:
         self.strategy = strategy_by_name(settings.strategy)
         self.pred_rec = PredictionRecorder(repos.predictions)
         self.resolver = ResolutionTracker(repos.predictions, repos.market_outcome)
+        # Observation run metadata
+        self.run_id = f"observation_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        self.model_version = "distance_to_strike_v2"
 
     async def initialize(self) -> None:
         """Load persisted state on startup."""
@@ -378,17 +381,16 @@ class Bot:
                         (BookLevel(n_price + spread, Decimal("1")),), now)
                     log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
 
-            # Build contract state (for backward compat with StrategyInput)
-            spread = yes.spread
-            contract = build_contract_state(market, self.state.btc_features, yes.best_ask, no.best_ask, spread)
-
             # Build canonical snapshot
             snapshot = MarketSnapshot.from_market(market, self.state.btc_features, yes, no)
-            if snapshot:
-                log.info("  snapshot: strike=$%s BTC=$%s dist=%.3f%% above=%s time_left=%ds/%ds",
-                    snapshot.strike_price, snapshot.btc_price,
-                    snapshot.distance_from_strike_pct, snapshot.is_above_strike,
-                    snapshot.seconds_remaining, snapshot.seconds_elapsed + snapshot.seconds_remaining)
+            if not snapshot:
+                log.info("  snapshot unavailable (missing strike or closes_at), skipping")
+                return
+
+            log.info("  snapshot: strike=$%s BTC=$%s dist=%.3f%% above=%s time_left=%ds/%ds",
+                snapshot.strike_price, snapshot.btc_price,
+                snapshot.distance_from_strike_pct, snapshot.is_above_strike,
+                snapshot.seconds_remaining, snapshot.seconds_elapsed + snapshot.seconds_remaining)
 
             # Check book quality (skip liquidity check in observation mode — we just want training data)
             reasons = []
@@ -413,58 +415,60 @@ class Bot:
                 log.info("  book issues: %s", reasons)
                 return
 
-            # Evaluate strategy
+            # Evaluate strategy — snapshot is the sole canonical input
             decision = self.strategy.evaluate(
-                StrategyInput(self.state.btc_features, yes.best_ask, no.best_ask, contract, snapshot),
+                StrategyInput(snapshot),
                 self.s,
             )
             risk_reasons = await self.risk.approve(market.market_id)
             reasons = list(decision.reasons) + risk_reasons
 
             # Record every prediction (regardless of approval)
-            if contract:
-                now = datetime.now(timezone.utc)
-                pred = PredictionRecord(
-                    market_id=market.market_id,
-                    event_id=market.event_id,
-                    title=market.title,
-                    strike_price=contract.strike_price,
-                    current_btc_price=contract.current_btc_price,
-                    distance_from_strike_pct=contract.distance_from_strike_pct,
-                    is_above_strike=contract.is_above_strike,
-                    seconds_remaining=contract.seconds_remaining,
-                    seconds_elapsed=contract.seconds_elapsed,
-                    realized_volatility=contract.realized_volatility,
-                    momentum_pct=contract.momentum_pct,
-                    yes_ask=yes.best_ask,
-                    no_ask=no.best_ask,
-                    spread=contract.spread,
-                    strategy=decision.strategy,
-                    probability=decision.probability,
-                    predicted_outcome=decision.outcome.value if decision.outcome else "",
-                    edge=decision.edge,
-                    edge_fee=decision.edge_fee,
-                    bayse_implied=yes.best_ask if decision.outcome and decision.outcome.value == "YES" else no.best_ask,
-                    signal_strength=decision.strength,
-                    approved=decision.approved,
-                    reasons=tuple(reasons),
-                    # Both-side edges (for research)
-                    yes_edge=decision.yes_edge,
-                    yes_edge_fee=decision.yes_edge_fee,
-                    no_edge=decision.no_edge,
-                    no_edge_fee=decision.no_edge_fee,
-                    # Timestamps
-                    observed_at=now,
-                    decided_at=now,
-                    # Contract timing
-                    opened_at=contract.opened_at if hasattr(contract, 'opened_at') else None,
-                    closes_at=contract.closes_at if hasattr(contract, 'closes_at') else None,
-                    volume_ratio=contract.volume_ratio if hasattr(contract, 'volume_ratio') else Decimal("0"),
-                    # Outcome IDs (for resolution mapping)
-                    outcome1_id=market.outcome1_id or "",
-                    outcome2_id=market.outcome2_id or "",
-                )
-                await self.pred_rec.record(pred)
+            now = datetime.now(timezone.utc)
+            pred = PredictionRecord(
+                market_id=market.market_id,
+                event_id=market.event_id,
+                title=market.title,
+                strike_price=snapshot.strike_price,
+                current_btc_price=snapshot.btc_price,
+                distance_from_strike_pct=snapshot.distance_from_strike_pct,
+                is_above_strike=snapshot.is_above_strike,
+                seconds_remaining=snapshot.seconds_remaining,
+                seconds_elapsed=snapshot.seconds_elapsed,
+                realized_volatility=snapshot.realized_volatility,
+                momentum_pct=snapshot.btc_momentum_pct,
+                yes_ask=snapshot.yes_ask,
+                no_ask=snapshot.no_ask,
+                spread=snapshot.spread,
+                strategy=decision.strategy,
+                probability=decision.probability,
+                predicted_outcome=decision.outcome.value if decision.outcome else "",
+                edge=decision.edge,
+                edge_fee=decision.edge_fee,
+                bayse_implied=snapshot.yes_ask if decision.outcome and decision.outcome.value == "YES" else snapshot.no_ask,
+                signal_strength=decision.strength,
+                approved=decision.approved,
+                reasons=tuple(reasons),
+                # Both-side edges (for research)
+                yes_edge=decision.yes_edge,
+                yes_edge_fee=decision.yes_edge_fee,
+                no_edge=decision.no_edge,
+                no_edge_fee=decision.no_edge_fee,
+                # Timestamps
+                observed_at=now,
+                decided_at=now,
+                # Contract timing (from snapshot)
+                opened_at=snapshot.opened_at,
+                closes_at=snapshot.closes_at,
+                volume_ratio=snapshot.btc_volume_ratio,
+                # Outcome IDs (for resolution mapping)
+                outcome1_id=market.outcome1_id or "",
+                outcome2_id=market.outcome2_id or "",
+                # Observation run metadata
+                model_version=self.model_version,
+                run_id=self.run_id,
+            )
+            await self.pred_rec.record(pred)
 
                 # Update bot status prediction count
                 try:

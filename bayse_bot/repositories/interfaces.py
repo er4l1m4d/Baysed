@@ -48,6 +48,7 @@ class PredictionRepository(ABC):
         prediction_correct: bool | None = None,
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
+        resolution_source: str = "",
     ) -> None:
         """Update prediction with resolution data."""
         ...

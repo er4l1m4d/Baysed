@@ -67,6 +67,7 @@ async def start_bot_engine():
             log.warning("no BTC price data after waiting, bot engine starting anyway")
 
         bot_diagnostics["started"] = True
+        bot_diagnostics["market_feed"] = market_feed
 
         # Create client (read-only endpoints work without API keys)
         client = BayseClient(s.bayse_base_url, s.public_key or "", s.secret_key or "")

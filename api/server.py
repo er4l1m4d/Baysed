@@ -258,6 +258,7 @@ async def debug():
         "resolved_markets": resolved_markets,
         "resolved_error": resolved_error,
         "has_api_keys": bool(os.getenv("BAYSE_PUBLIC_KEY")),
+        "ws_health": bot_diagnostics.get("market_feed", {}).health() if hasattr(bot_diagnostics.get("market_feed", {}), "health") else None,
     }
 
 

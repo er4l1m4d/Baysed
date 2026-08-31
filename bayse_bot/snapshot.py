@@ -57,6 +57,7 @@ class MarketSnapshot:
     distance_from_strike_pct: Decimal = Decimal("0")
     is_above_strike: bool = False
     spread: Decimal | None = None
+    realized_volatility: Decimal = Decimal("0")
 
     # --- Source metadata ---
     observed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -130,6 +131,7 @@ class MarketSnapshot:
             distance_from_strike_pct=distance,
             is_above_strike=is_above,
             spread=spread,
+            realized_volatility=btc.atr_pct,
         )
 
     def to_dict(self) -> dict[str, Any]:

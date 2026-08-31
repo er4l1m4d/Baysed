@@ -61,7 +61,9 @@ class Prediction(Base):
 
     # Metadata
     strategy_version = Column(String(20), default="2")
-    experiment_tag = Column(String(100), default="distance_to_strike_v1")
+    experiment_tag = Column(String(100), default="distance_to_strike_v2")
+    model_version = Column(String(100), default="distance_to_strike_v2")
+    run_id = Column(String(100), default="")
 
     # Timestamps (multi-granularity)
     observed_at = Column(DateTime(timezone=True))       # when market was first seen in scan
@@ -82,6 +84,7 @@ class Prediction(Base):
     actual_price = Column(Numeric(20, 8))
     resolved_at = Column(DateTime(timezone=True))
     resolved_outcome_id = Column(String(255))  # raw Bayse value for audit trail
+    resolution_source = Column(String(50), default="")  # "bayse_api" or "btc_vs_strike"
     prediction_correct = Column(Boolean)
     brier_score = Column(Numeric(10, 6))
 

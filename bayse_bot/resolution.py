@@ -136,6 +136,7 @@ class ResolutionTracker:
                 prediction_correct=was_correct,
                 brier_score=brier_score,
                 resolved_outcome_id=resolved_outcome_id,
+                resolution_source="bayse_api",
             )
 
             resolved_count += 1
@@ -222,6 +223,7 @@ class ResolutionTracker:
                     prediction_correct=was_correct,
                     brier_score=brier_score,
                     resolved_outcome_id="",
+                    resolution_source="btc_vs_strike",
                 )
 
                 resolved_count += 1

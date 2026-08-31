@@ -188,6 +188,28 @@ class BayseMarketFeed:
         self.subscribed_markets: set[str] = set()
         self.last_message_at: datetime | None = None
         self.mapping_errors: int = 0
+        # Health metrics for observation run
+        self.connect_count: int = 0
+        self.disconnect_count: int = 0
+        self.reconnect_count: int = 0
+        self.server_error_count: int = 0
+
+    def health(self) -> dict[str, Any]:
+        """Return WS health metrics for diagnostics."""
+        from typing import Any
+        last_age_ms = None
+        if self.last_message_at:
+            last_age_ms = (datetime.now(timezone.utc) - self.last_message_at).total_seconds() * 1000
+        return {
+            "connect_count": self.connect_count,
+            "disconnect_count": self.disconnect_count,
+            "reconnect_count": self.reconnect_count,
+            "server_error_count": self.server_error_count,
+            "mapping_errors": self.mapping_errors,
+            "last_message_age_ms": round(last_age_ms, 0) if last_age_ms else None,
+            "subscribed_events": len(self.subscribed_events),
+            "subscribed_markets": len(self.subscribed_markets),
+        }
 
     async def run(
         self,
@@ -224,6 +246,9 @@ class BayseMarketFeed:
                     except asyncio.TimeoutError:
                         log.warning("BayseMarketFeed: no 'connected' message within 10s")
 
+                    if backoff > 1:
+                        self.reconnect_count += 1
+                    self.connect_count += 1
                     backoff = 1
 
                     # Re-subscribe after reconnect
@@ -274,9 +299,11 @@ class BayseMarketFeed:
                                 await on_trade(event_id, msg)
 
                             elif msg_type == "error":
+                                self.server_error_count += 1
                                 log.warning("BayseMarketFeed server error: %s", data.get("message", data))
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:
+                self.disconnect_count += 1
                 log.warning("BayseMarketFeed connection issue: %s %s (retrying in %ds)",
                     type(exc).__name__, exc.args or "(no detail)", min(backoff, 30))
                 await asyncio.sleep(min(backoff, 30))

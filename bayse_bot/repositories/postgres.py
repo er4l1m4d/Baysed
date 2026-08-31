@@ -106,6 +106,7 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
         prediction_correct: bool | None = None,
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
+        resolution_source: str = "",
     ) -> None:
         """Update the LATEST prediction snapshot for a market with resolution data."""
         from api.models import Prediction
@@ -132,6 +133,8 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
                 values["brier_score"] = brier_score
             if resolved_outcome_id is not None:
                 values["resolved_outcome_id"] = resolved_outcome_id
+            if resolution_source:
+                values["resolution_source"] = resolution_source
 
             await s.execute(
                 update(Prediction)

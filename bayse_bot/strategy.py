@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import math
 from .config import Settings
-from .contract import ContractState
 from .models import BTCFeatures, Decision, Outcome
 from .snapshot import MarketSnapshot
 
@@ -77,16 +76,12 @@ def probability_from_distance_to_strike(
     return max(Decimal("0.01"), min(Decimal("0.99"), normal_cdf(z)))
 
 # ---------------------------------------------------------------------------
-# Strategy input — accepts MarketSnapshot or legacy components
+# Strategy input — MarketSnapshot is the sole canonical input
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class StrategyInput:
-    btc: BTCFeatures
-    yes_ask: Decimal
-    no_ask: Decimal
-    contract: ContractState | None = None
-    snapshot: MarketSnapshot | None = None
+    snapshot: MarketSnapshot
 
 # ---------------------------------------------------------------------------
 # Base strategy
@@ -96,62 +91,61 @@ class Strategy:
     name = "base"; version = "1"
     def evaluate(self, x: StrategyInput, s: Settings) -> Decision: raise NotImplementedError
     def _qualified(self, x: StrategyInput, s: Settings) -> list[str]:
+        snap = x.snapshot
         reasons=[]
-        if not x.btc.complete: reasons.append("btc_data_incomplete_or_stale")
-        if abs(x.btc.momentum_pct) < s.momentum_threshold: reasons.append("momentum_below_threshold")
-        if x.btc.volume_ratio < s.volume_multiplier: reasons.append("volume_below_threshold")
-        if not s.min_atr <= x.btc.atr_pct <= s.max_atr: reasons.append("atr_out_of_range")
+        if not snap.btc_complete: reasons.append("btc_data_incomplete_or_stale")
+        if abs(snap.btc_momentum_pct) < s.momentum_threshold: reasons.append("momentum_below_threshold")
+        if snap.btc_volume_ratio < s.volume_multiplier: reasons.append("volume_below_threshold")
+        if not s.min_atr <= snap.btc_atr_pct <= s.max_atr: reasons.append("atr_out_of_range")
         return reasons
 
 # ---------------------------------------------------------------------------
-# Distance-to-strike model (new primary model)
+# Distance-to-strike model (primary — locked for Observation Run 001)
 # ---------------------------------------------------------------------------
+
+MODEL_VERSION = "distance_to_strike_v2"
 
 class DistanceToStrikeModel(Strategy):
     name = "distance_to_strike"
-    version = "2"
+    version = MODEL_VERSION
 
     def evaluate(self, x: StrategyInput, s: Settings) -> Decision:
         reasons = []
-        contract = x.contract
+        snap = x.snapshot
 
-        if not x.btc.complete:
+        if not snap.btc_complete:
             reasons.append("btc_data_incomplete_or_stale")
             return Decision(self.name, None, None, None, None, Decimal("0"), False, tuple(reasons))
 
-        if not contract:
-            reasons.append("no_contract_state")
-            return Decision(self.name, None, None, None, None, Decimal("0"), False, tuple(reasons))
-
-        # Compute probability from distance + volatility + time remaining
+        # Compute probability from snapshot (canonical source)
         probability = probability_from_distance_to_strike(
-            contract.distance_from_strike_pct,
-            contract.realized_volatility,
-            contract.seconds_remaining,
+            snap.distance_from_strike_pct,
+            snap.realized_volatility,
+            snap.seconds_remaining,
         )
 
         # Compute edges for BOTH sides (for research)
         p_no = Decimal("1") - probability
-        yes_edge = (probability - x.yes_ask) if x.yes_ask else None
-        no_edge = (p_no - x.no_ask) if x.no_ask else None
-        yes_edge_fee = fee_adjusted_edge(probability, x.yes_ask)
-        no_edge_fee = fee_adjusted_edge(p_no, x.no_ask)
+        yes_edge = (probability - snap.yes_ask) if snap.yes_ask else None
+        no_edge = (p_no - snap.no_ask) if snap.no_ask else None
+        yes_edge_fee = fee_adjusted_edge(probability, snap.yes_ask)
+        no_edge_fee = fee_adjusted_edge(p_no, snap.no_ask)
 
         # Signal: YES if probability > 50% (above strike), NO if below
         outcome = Outcome.YES if probability > Decimal("0.5") else Outcome.NO
-        price = x.yes_ask if outcome is Outcome.YES else x.no_ask
+        price = snap.yes_ask if outcome is Outcome.YES else snap.no_ask
 
         # Selected side edge (for backward compat)
         edge = yes_edge if outcome is Outcome.YES else no_edge
         edge_fee = yes_edge_fee if outcome is Outcome.YES else no_edge_fee
 
         # Strength: how far z-score is from 0 (normalized)
-        time_frac = Decimal(str(contract.seconds_remaining)) / Decimal("60")
-        expected_move = contract.realized_volatility * time_frac.sqrt() if time_frac > 0 and contract.realized_volatility > 0 else Decimal("1")
-        strength = abs(contract.distance_from_strike_pct) / expected_move if expected_move > 0 else Decimal("0")
+        time_frac = Decimal(str(snap.seconds_remaining)) / Decimal("60")
+        expected_move = snap.realized_volatility * time_frac.sqrt() if time_frac > 0 and snap.realized_volatility > 0 else Decimal("1")
+        strength = abs(snap.distance_from_strike_pct) / expected_move if expected_move > 0 else Decimal("0")
 
         # Book quality checks
-        if x.yes_ask is None or x.no_ask is None:
+        if snap.yes_ask is None or snap.no_ask is None:
             reasons.append("missing_book_prices")
 
         # Edge guards — use fee-adjusted edge for approval decisions
@@ -165,7 +159,7 @@ class DistanceToStrikeModel(Strategy):
             reasons.append("signal_strength_below_minimum")
 
         # Time guard: don't trade in last minute
-        if contract.seconds_remaining < 60:
+        if snap.seconds_remaining < 60:
             reasons.append("too_close_to_expiry")
 
         return Decision(
@@ -182,13 +176,15 @@ class DistanceToStrikeModel(Strategy):
 class MomentumContinuation(Strategy):
     name="momentum_continuation"
     def evaluate(self, x, s):
-        reasons=self._qualified(x,s); outcome=Outcome.YES if x.btc.momentum_pct >= 0 else Outcome.NO
-        probability=probability_from_momentum(x.btc.momentum_pct); price=x.yes_ask if outcome is Outcome.YES else x.no_ask
-        edge=(probability if outcome is Outcome.YES else 1-probability)-price
+        snap=x.snapshot; reasons=self._qualified(x,s)
+        outcome=Outcome.YES if snap.btc_momentum_pct >= 0 else Outcome.NO
+        probability=probability_from_momentum(snap.btc_momentum_pct)
+        price=snap.yes_ask if outcome is Outcome.YES else snap.no_ask
+        edge=(probability if outcome is Outcome.YES else 1-probability)-price if price else None
         edge_fee=fee_adjusted_edge(probability, price)
-        strength=abs(x.btc.momentum_pct)/max(s.momentum_threshold,Decimal("0.0001"))
-        if edge < s.min_model_gap: reasons.append("model_edge_below_minimum")
-        if edge > s.max_model_gap: reasons.append("model_edge_above_guardrail")
+        strength=abs(snap.btc_momentum_pct)/max(s.momentum_threshold,Decimal("0.0001"))
+        if edge is not None and edge < s.min_model_gap: reasons.append("model_edge_below_minimum")
+        if edge is not None and edge > s.max_model_gap: reasons.append("model_edge_above_guardrail")
         if edge_fee is not None and edge_fee < 0: reasons.append("negative_edge_after_fees")
         if strength < s.min_strength: reasons.append("signal_strength_below_minimum")
         return Decision(self.name,outcome,probability,edge,edge_fee,strength,not reasons,tuple(reasons))
@@ -196,10 +192,11 @@ class MomentumContinuation(Strategy):
 class MeanReversionInversion(MomentumContinuation):
     name="mean_reversion_inversion"
     def evaluate(self,x,s):
-        base=super().evaluate(x,s); outcome=Outcome.NO if base.outcome is Outcome.YES else Outcome.YES
+        base=super().evaluate(x,s); snap=x.snapshot
+        outcome=Outcome.NO if base.outcome is Outcome.YES else Outcome.YES
         probability=(1-base.probability) if base.probability is not None else None
-        price=x.yes_ask if outcome is Outcome.YES else x.no_ask
-        edge=(probability-price) if probability is not None else None
+        price=snap.yes_ask if outcome is Outcome.YES else snap.no_ask
+        edge=(probability-price) if probability is not None and price else None
         edge_fee=fee_adjusted_edge(probability, price)
         reasons=[r for r in base.reasons if not r.startswith("model_edge")]
         if edge is None or edge < s.min_model_gap: reasons.append("model_edge_below_minimum")

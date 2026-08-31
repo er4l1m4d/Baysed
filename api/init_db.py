@@ -51,6 +51,9 @@ PREDICTION_COLUMNS = [
     ("yes_edge_fee", "NUMERIC(10, 6)"),
     ("no_edge", "NUMERIC(10, 6)"),
     ("no_edge_fee", "NUMERIC(10, 6)"),
+    ("model_version", "VARCHAR(100)"),
+    ("run_id", "VARCHAR(100)"),
+    ("resolution_source", "VARCHAR(50)"),
 ]
 
 BOT_STATUS_COLUMNS = [
