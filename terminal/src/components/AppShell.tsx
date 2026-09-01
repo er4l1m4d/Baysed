@@ -49,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         } ${hydrated ? "" : "md:pl-60"}`}
       >
         <Header onOpenMobileNav={() => setMobileOpen(true)} />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-6">
+        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-6 md:px-6">
           {children}
         </main>
       </div>

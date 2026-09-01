@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { Card, CardHeader, PillToggle, EmptyState } from "./ui";
 import { usePredictions } from "@/hooks/useBayseData";
-import type { Prediction } from "@/lib/api";
 
 const PERIODS = ["Daily", "Weekly", "Monthly"] as const;
 type Period = (typeof PERIODS)[number];
@@ -66,42 +65,51 @@ export function PerformanceCard() {
     <Card className="flex flex-col">
       <CardHeader
         title="Performance"
+        icon="monitoring"
         actions={<PillToggle options={PERIODS} value={period} onChange={setPeriod} />}
       />
 
-      <div className="px-5 pt-3">
+      <div className="px-5 pt-4">
         {loading ? (
           <div className="skeleton h-8 w-32" />
         ) : current != null ? (
-          <div className="flex items-baseline gap-2.5">
-            <span className="tabular text-[28px] font-bold leading-none text-white">
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="tabular text-[28px] font-semibold leading-none tracking-tight text-on-surface">
               {current.toFixed(4)}
             </span>
             {delta != null && (
               <span
-                className={`tabular text-sm font-medium ${
-                  delta <= 0 ? "text-emerald-400" : "text-rose-400"
+                className={`label-caps-sm tabular inline-flex items-center gap-1 rounded-full border px-2 py-1 ${
+                  delta <= 0
+                    ? "border-primary-container/25 bg-primary-container/10 text-primary-container"
+                    : "border-error/25 bg-error/10 text-error"
                 }`}
               >
-                {delta <= 0 ? "▼" : "▲"} {Math.abs(delta).toFixed(4)} rolling Brier
+                <span className="material-symbols-outlined text-[13px]">
+                  {delta <= 0 ? "trending_down" : "trending_up"}
+                </span>
+                {Math.abs(delta).toFixed(4)} ROLLING BRIER
               </span>
             )}
           </div>
         ) : (
-          <span className="text-[28px] font-bold leading-none text-zinc-600">--</span>
+          <span className="tabular text-[28px] font-semibold leading-none text-on-surface-variant/40">
+            --
+          </span>
         )}
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="label-caps-sm mt-2 text-on-surface-variant/70">
           Rolling {ROLLING_WINDOW}-snapshot mean · lower is better
         </p>
       </div>
 
-      <div className="mt-4 flex-1 px-2 pb-3">
+      <div className="mt-4 flex-1 px-2 pb-4">
         {loading ? (
           <div className="skeleton mx-3 h-[200px]" />
         ) : series.length < 2 ? (
           <EmptyState
             title="Not enough resolved snapshots"
             hint="The Brier trend appears once predictions start resolving."
+            icon="query_stats"
           />
         ) : (
           <Chart series={series} period={period} />
@@ -136,14 +144,13 @@ function Chart({
   const y = (v: number) =>
     H - PAD_Y - ((v - yMin) / (yMax - yMin)) * (H - PAD_Y * 2);
 
-  // Smooth path via simple monotone-ish segments (polyline with slight rounding)
   const points = series.map((d) => [x(d.ts), y(d.value)] as const);
   const linePath = points
     .map(([px, py], i) => `${i === 0 ? "M" : "L"}${px.toFixed(2)},${py.toFixed(2)}`)
     .join(" ");
   const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
 
-  // Grid: 4 horizontal lines with value labels
+  // Grid: horizontal lines with value labels
   const gridValues = [0, 0.25, 0.5, 0.75, 1]
     .map((f) => yMin + f * (yMax - yMin))
     .filter((v) => v <= yMax);
@@ -153,7 +160,7 @@ function Chart({
 
   return (
     <div>
-      <div className="relative mx-3 h-[200px]">
+      <div className="dot-matrix relative mx-3 h-[200px] rounded-md">
         <svg
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
@@ -163,8 +170,8 @@ function Chart({
         >
           <defs>
             <linearGradient id="brierFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#F59E0B" stopOpacity="0.14" />
-              <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+              <stop offset="0%" stopColor="#00ffa3" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#00ffa3" stopOpacity="0" />
             </linearGradient>
           </defs>
 
@@ -176,7 +183,7 @@ function Chart({
               x2={W}
               y1={y(v)}
               y2={y(v)}
-              stroke="#27272a"
+              stroke="#262626"
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
@@ -189,33 +196,48 @@ function Chart({
               x2={W}
               y1={y(BASELINE)}
               y2={y(BASELINE)}
-              stroke="#52525B"
+              stroke="#849588"
               strokeWidth="1"
-              strokeDasharray="3 3"
+              strokeDasharray="4 3"
               vectorEffect="non-scaling-stroke"
             />
           )}
 
-          {/* Area + line */}
+          {/* Area + neon line */}
           <path d={areaPath} fill="url(#brierFill)" />
           <path
             d={linePath}
             fill="none"
-            stroke="#F59E0B"
+            stroke="#00ffa3"
             strokeWidth="2"
             vectorEffect="non-scaling-stroke"
             strokeLinejoin="round"
             strokeLinecap="round"
+            style={{ filter: "drop-shadow(0 0 6px rgba(0, 255, 163, 0.5))" }}
           />
 
-          {/* Last point marker */}
-          {points.length > 0 && (
-            <circle
-              cx={points[points.length - 1][0]}
-              cy={points[points.length - 1][1]}
-              r="1.2"
-              fill="#F59E0B"
-            />
+          {/* Data points — last one glows */}
+          {points.map(([px, py], i) =>
+            i === points.length - 1 ? (
+              <circle
+                key={i}
+                cx={px}
+                cy={py}
+                r="1.4"
+                fill="#00ffa3"
+                style={{ filter: "drop-shadow(0 0 4px #00ffa3)" }}
+              />
+            ) : (
+              <circle
+                key={i}
+                cx={px}
+                cy={py}
+                r="1"
+                fill="#131313"
+                stroke="#00ffa3"
+                strokeWidth="0.6"
+              />
+            )
           )}
         </svg>
 
@@ -224,21 +246,37 @@ function Chart({
           {gridValues.map((v) => (
             <span
               key={v}
-              className="tabular absolute -left-0.5 -translate-x-full -translate-y-1/2 text-[10px] text-zinc-500"
+              className="label-caps-sm tabular absolute -translate-x-full -translate-y-1/2 text-on-surface-variant/60"
               style={{
                 top: `${((y(v) / H) * 100).toFixed(1)}%`,
+                left: "6px",
               }}
             >
               {v.toFixed(2)}
             </span>
           ))}
+          {/* Baseline tag */}
+          {BASELINE <= yMax && (
+            <span
+              className="label-caps-sm absolute -translate-y-1/2 text-on-surface-variant/50"
+              style={{
+                top: `${((y(BASELINE) / H) * 100).toFixed(1)}%`,
+                right: "6px",
+              }}
+            >
+              RANDOM
+            </span>
+          )}
         </div>
       </div>
 
       {/* X-axis labels */}
       <div className="mx-3 mt-2 flex justify-between">
         {xTicks.map((ts) => (
-          <span key={ts} className="text-[10px] text-zinc-500">
+          <span
+            key={ts}
+            className="label-caps-sm tabular text-on-surface-variant/60"
+          >
             {fmtDate(ts, period)}
           </span>
         ))}

@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 
+/* ------------------------------------------------------------------ */
+/* Surfaces                                                            */
+/* ------------------------------------------------------------------ */
+
 export function Card({
   children,
   className = "",
@@ -7,74 +11,107 @@ export function Card({
   children: ReactNode;
   className?: string;
 }) {
-  return (
-    <div
-      className={`rounded-xl border border-zinc-800 bg-zinc-900 transition-[border-color,transform] duration-150 hover:border-zinc-700 ${className}`}
-    >
-      {children}
-    </div>
-  );
+  return <div className={`glass-card rounded-xl ${className}`}>{children}</div>;
 }
 
 export function CardHeader({
   title,
   subtitle,
   actions,
+  icon,
 }: {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  icon?: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-5 pt-5">
-      <div>
-        <h2 className="text-base font-semibold text-white">{title}</h2>
-        {subtitle && (
-          <p className="mt-0.5 text-[13px] text-zinc-400">{subtitle}</p>
+    <div className="flex items-center justify-between gap-4 border-b border-border-subtle px-5 py-3.5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        {icon && (
+          <span className="material-symbols-outlined text-[16px] text-primary-container">
+            {icon}
+          </span>
         )}
+        <div className="min-w-0">
+          <h2 className="label-caps truncate text-on-surface">{title}</h2>
+          {subtitle && (
+            <p className="mt-1 text-xs leading-snug text-on-surface-variant/80">
+              {subtitle}
+            </p>
+          )}
+        </div>
       </div>
       {actions && <div className="shrink-0">{actions}</div>}
     </div>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Stat card — tactical HUD panel                                      */
+/* ------------------------------------------------------------------ */
+
+export type StatTone = "green" | "gold" | "red" | "neutral";
+
 export function StatCard({
   label,
   value,
   subtitle,
-  dot,
+  icon,
+  tone = "neutral",
   loading,
+  className = "",
 }: {
   label: string;
   value: string;
   subtitle?: string;
-  dot?: "green" | "gold" | "red";
+  icon?: string;
+  tone?: StatTone;
   loading?: boolean;
+  className?: string;
 }) {
-  const dotColor =
-    dot === "green" ? "bg-emerald-500" : dot === "gold" ? "bg-amber-500" : dot === "red" ? "bg-rose-500" : "bg-zinc-600";
+  const valueColor =
+    tone === "green"
+      ? "text-primary-container neon-glow"
+      : tone === "gold"
+        ? "text-warning-gold"
+        : tone === "red"
+          ? "text-error"
+          : "text-on-surface";
 
   return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-          {label}
-        </span>
+    <div
+      className={`tactical-panel flex h-24 flex-col justify-between rounded-lg p-4 ${className}`}
+    >
+      <div className="flex items-start justify-between">
+        <span className="label-caps-sm text-on-surface-variant">{label}</span>
+        {icon && (
+          <span className="material-symbols-outlined text-[16px] text-on-surface-variant/70">
+            {icon}
+          </span>
+        )}
       </div>
       {loading ? (
-        <div className="skeleton mt-3 h-8 w-20" />
+        <div className="skeleton h-7 w-20" />
       ) : (
-        <div className="tabular mt-2 text-[28px] font-bold leading-tight text-white">
+        <div
+          className={`tabular text-[26px] font-semibold leading-none tracking-tight ${valueColor}`}
+        >
           {value}
         </div>
       )}
       {subtitle && (
-        <div className="mt-1 text-xs text-zinc-400">{subtitle}</div>
+        <div className="label-caps-sm truncate text-on-surface-variant/80">
+          {subtitle}
+        </div>
       )}
-    </Card>
+    </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Segmented pill toggle                                               */
+/* ------------------------------------------------------------------ */
 
 export function PillToggle<T extends string>({
   options,
@@ -86,7 +123,10 @@ export function PillToggle<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex gap-1.5" role="tablist">
+    <div
+      className="flex rounded-full border border-border-subtle bg-surface-container-lowest p-1"
+      role="tablist"
+    >
       {options.map((opt) => {
         const active = opt === value;
         return (
@@ -95,10 +135,10 @@ export function PillToggle<T extends string>({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(opt)}
-            className={`h-7 rounded-full px-3 text-xs font-medium transition-colors duration-150 ${
+            className={`label-caps-sm rounded-full px-3 py-1 transition-colors duration-150 ${
               active
-                ? "bg-amber-500 text-black"
-                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                ? "bg-primary-container/15 text-primary-container neon-glow"
+                : "text-on-surface-variant/70 hover:text-on-surface"
             }`}
           >
             {opt}
@@ -109,35 +149,65 @@ export function PillToggle<T extends string>({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Badges & pills                                                      */
+/* ------------------------------------------------------------------ */
+
 export function OutcomePill({ outcome }: { outcome: "YES" | "NO" }) {
+  const up = outcome === "YES";
   return (
     <span
-      className={`inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold ${
-        outcome === "YES"
-          ? "bg-emerald-500/15 text-emerald-400"
-          : "bg-rose-500/15 text-rose-400"
+      className={`label-caps-sm inline-flex items-center rounded-sm border px-1.5 py-0.5 ${
+        up
+          ? "border-primary-container/30 bg-primary-container/15 text-primary-container"
+          : "border-error/30 bg-error/15 text-error"
       }`}
     >
-      {outcome}
+      {up ? "UP" : "DOWN"}
     </span>
   );
 }
 
+export function StatusBadge({ status }: { status: "pending" | "correct" | "wrong" }) {
+  const styles =
+    status === "pending"
+      ? "border-warning-gold/30 bg-warning-gold/10 text-warning-gold"
+      : status === "correct"
+        ? "border-primary-container/30 bg-primary-container/15 text-primary-container"
+        : "border-error/30 bg-error/15 text-error";
+  return (
+    <span
+      className={`label-caps-sm inline-flex items-center rounded-sm border px-1.5 py-0.5 ${styles}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty state                                                         */
+/* ------------------------------------------------------------------ */
+
 export function EmptyState({
   title,
   hint,
+  icon = "satellite_alt",
 }: {
   title: string;
   hint?: string;
+  icon?: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 text-center">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-700" aria-hidden>
-        <path d="M3 3v18h18" strokeLinecap="round" />
-        <path d="M7 14l4-4 3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <p className="mt-3 text-sm text-zinc-400">{title}</p>
-      {hint && <p className="mt-1 text-xs text-zinc-600">{hint}</p>}
+    <div className="dot-matrix flex flex-col items-center justify-center rounded-lg py-10 text-center">
+      <span className="material-symbols-outlined text-[28px] text-on-surface-variant/40">
+        {icon}
+      </span>
+      <p className="mt-3 text-sm text-on-surface-variant">{title}</p>
+      {hint && (
+        <p className="mt-1 max-w-xs text-xs leading-relaxed text-on-surface-variant/60">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

@@ -10,9 +10,16 @@ import {
   usePredictions,
 } from "@/hooks/useBayseData";
 import type { Prediction } from "@/lib/api";
-import { Card, CardHeader, StatCard, PillToggle, OutcomePill, EmptyState } from "@/components/ui";
+import {
+  Card,
+  CardHeader,
+  StatCard,
+  PillToggle,
+  OutcomePill,
+  StatusBadge,
+  EmptyState,
+} from "@/components/ui";
 import { PerformanceCard } from "@/components/BrierChart";
-import { IconArrowUp, IconArrowDown, IconCheck, IconX, IconClock } from "@/components/Icons";
 
 const usd = (v: number | null | undefined) =>
   v != null
@@ -43,6 +50,19 @@ function timeAgo(iso: string) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function PageHeader() {
+  return (
+    <div>
+      <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-on-surface">
+        Overview
+      </h1>
+      <p className="mt-1.5 text-sm text-on-surface-variant">
+        Observation Run 001 — engine health, live market and resolution quality.
+      </p>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Summary cards                                                       */
 /* ------------------------------------------------------------------ */
@@ -65,34 +85,38 @@ function StatsRow() {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         label="Total Predictions"
+        icon="query_stats"
         value={String(calibration?.total ?? 0)}
         subtitle={
           lastHour > 0
             ? `+${lastHour} in the last hour`
-            : `strategy ${status?.strategy ?? "distance_to_strike"}`
+            : `strat ${status?.strategy ?? "distance_to_strike"}`
         }
-        dot={status?.is_running ? "green" : "red"}
+        tone={status?.is_running ? "green" : "red"}
         loading={loading}
       />
       <StatCard
         label="Accuracy"
+        icon="target"
         value={accuracy != null ? pct(accuracy) : "--"}
         subtitle={`${calibration?.correct ?? 0}/${calibration?.resolved ?? 0} correct`}
-        dot={accuracy == null ? undefined : accuracy >= 0.5 ? "green" : "red"}
+        tone={accuracy == null ? "neutral" : accuracy >= 0.5 ? "green" : "red"}
         loading={loading}
       />
       <StatCard
         label="Brier Mean"
+        icon="functions"
         value={brier != null ? brier.toFixed(4) : "--"}
         subtitle="Lower is better"
-        dot={brier == null ? undefined : brier < 0.25 ? "green" : "red"}
+        tone={brier == null ? "neutral" : brier < 0.25 ? "green" : "red"}
         loading={loading}
       />
       <StatCard
         label="Pending"
+        icon="schedule"
         value={String(calibration?.pending ?? 0)}
         subtitle="Awaiting resolution"
-        dot="gold"
+        tone="gold"
         loading={loading}
       />
     </div>
@@ -130,12 +154,15 @@ function LiveMarketCard() {
 
   if (!liveMarket || !liveMarket.is_active) {
     return (
-      <Card className="p-5">
-        <h2 className="text-base font-semibold text-white">Live Market</h2>
-        <EmptyState
-          title="No active market"
-          hint="The next 15-minute contract opens shortly."
-        />
+      <Card>
+        <CardHeader title="Live Market" icon="show_chart" />
+        <div className="px-5 py-4">
+          <EmptyState
+            title="No active market"
+            hint="The next 15-minute contract opens shortly."
+            icon="candlestick_chart"
+          />
+        </div>
       </Card>
     );
   }
@@ -157,85 +184,121 @@ function LiveMarketCard() {
   const mmss = (s: number) =>
     `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-  const stats: { label: string; value: string; tone?: "up" | "down" | "gold" }[] = [
-    { label: "Strike Price", value: usd(strike) },
-    {
-      label: "Current Price",
-      value: usd(current),
-      tone: distance == null ? undefined : distance >= 0 ? "up" : "down",
-    },
+  const stats: {
+    label: string;
+    value: string;
+    tone?: "up" | "down" | "gold";
+  }[] = [
+    { label: "Strike", value: usd(strike) },
     {
       label: "Distance",
       value: signed(distance, 3),
       tone: distance == null ? undefined : distance >= 0 ? "up" : "down",
     },
     { label: "Model P(Up)", value: pct(liveMarket.model_probability), tone: "gold" },
-    { label: "Yes / No Ask", value: `${liveMarket.yes_ask?.toFixed(2) ?? "--"} / ${liveMarket.no_ask?.toFixed(2) ?? "--"}` },
-    { label: "Time Remaining", value: remaining != null ? mmss(remaining) : "--" },
+    {
+      label: "Ask Y / N",
+      value: `${liveMarket.yes_ask?.toFixed(2) ?? "--"} / ${liveMarket.no_ask?.toFixed(2) ?? "--"}`,
+    },
   ];
 
   return (
-    <Card className="flex flex-col p-5">
-      <h2 className="text-base font-semibold text-white">Live Market</h2>
+    <Card className="flex flex-col">
+      <CardHeader
+        title="Live Market"
+        icon="show_chart"
+        actions={
+          <span className="label-caps-sm flex items-center gap-1.5 rounded-full border border-primary-container/30 bg-primary-container/10 px-2 py-1 text-primary-container">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-container" />
+            LIVE
+          </span>
+        }
+      />
 
-      <p className="mt-4 text-lg font-medium text-white">
-        BTC {strike != null ? (distance != null && distance >= 0 ? ">" : "≤") : ""}{" "}
-        {usd(strike)}
-      </p>
-      <div
-        className={`tabular mt-1 text-4xl font-bold leading-none ${
-          distance == null ? "text-white" : distance >= 0 ? "text-emerald-400" : "text-rose-400"
-        }`}
-      >
-        {usd(current)}
+      <div className="px-5 pt-4">
+        <p className="label-caps text-on-surface-variant/70">
+          BTC {strike != null ? (distance != null && distance >= 0 ? ">" : "≤") : ""}{" "}
+          {usd(strike)}
+        </p>
+        <div
+          className={`tabular mt-1.5 text-[32px] font-semibold leading-none tracking-tight ${
+            distance == null
+              ? "text-on-surface"
+              : distance >= 0
+                ? "text-primary-container neon-glow"
+                : "text-error"
+          }`}
+        >
+          {usd(current)}
+        </div>
       </div>
 
       {/* Time-remaining progress */}
-      <div className="mt-5">
-        <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+      <div className="mt-5 px-5">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-bright">
           <div
-            className="h-full rounded-full bg-amber-500 transition-[width] duration-1000 ease-linear"
+            className="progress-bar-striped h-full bg-primary-container transition-[width] duration-1000 ease-linear"
             style={{ width: progress != null ? `${(1 - progress) * 100}%` : "0%" }}
           />
         </div>
-        <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
-          <span className="flex items-center gap-1">
-            <IconClock width={11} height={11} />
-            {remaining != null ? mmss(remaining) : "--"} left
+        <div className="label-caps-sm mt-1.5 flex items-center justify-between text-on-surface-variant">
+          <span className="flex items-center gap-1 text-primary-container">
+            <span className="material-symbols-outlined text-[12px]">schedule</span>
+            {remaining != null ? mmss(remaining) : "--"} LEFT
           </span>
-          <span>closes {liveMarket.closes_at ? new Date(liveMarket.closes_at).toLocaleTimeString() : "--"}</span>
+          <span>
+            CLOSES{" "}
+            {liveMarket.closes_at
+              ? new Date(liveMarket.closes_at).toLocaleTimeString()
+              : "--"}
+          </span>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="mt-5 space-y-2.5">
+      <div className="mt-4 flex-1 space-y-0 px-5">
         {stats.map((s) => (
-          <div key={s.label} className="flex items-center justify-between text-[13px]">
-            <span className="flex items-center gap-2 text-zinc-400">
+          <div
+            key={s.label}
+            className="flex items-center justify-between border-b border-border-subtle/60 py-2 last:border-0"
+          >
+            <span className="label-caps-sm flex items-center gap-2 text-on-surface-variant">
               <span
-                className={`h-2 w-2 rounded-full ${
+                className={`h-1.5 w-1.5 rounded-full ${
                   s.tone === "up"
-                    ? "bg-emerald-500"
+                    ? "bg-primary-container"
                     : s.tone === "down"
-                      ? "bg-rose-500"
+                      ? "bg-error"
                       : s.tone === "gold"
-                        ? "bg-amber-500"
-                        : "bg-zinc-600"
+                        ? "bg-warning-gold"
+                        : "bg-surface-bright"
                 }`}
               />
               {s.label}
             </span>
-            <span className="tabular font-semibold text-white">{s.value}</span>
+            <span
+              className={`tabular text-[13px] font-semibold ${
+                s.tone === "up"
+                  ? "text-primary-container"
+                  : s.tone === "down"
+                    ? "text-error"
+                    : "text-on-surface"
+              }`}
+            >
+              {s.value}
+            </span>
           </div>
         ))}
       </div>
 
-      <Link
-        href="/live-market"
-        className="mt-6 flex h-10 items-center justify-center rounded-full bg-zinc-800 text-[13px] font-medium text-zinc-300 transition-colors duration-150 hover:bg-zinc-700 hover:text-white"
-      >
-        Explore Live Market →
-      </Link>
+      <div className="p-5">
+        <Link
+          href="/live-market"
+          className="label-caps flex h-10 items-center justify-center rounded-lg border border-border-subtle bg-surface-bright/30 text-on-surface transition-all duration-150 hover:border-primary-container/40 hover:bg-surface-bright/50 hover:text-primary-container"
+        >
+          Explore Live Market →
+        </Link>
+      </div>
     </Card>
   );
 }
@@ -262,12 +325,13 @@ function ObservationSnapshots() {
       <CardHeader
         title="Observation Snapshots"
         subtitle="Model predictions and outcomes per market window"
+        icon="layers"
         actions={<PillToggle options={SNAP_TABS} value={tab} onChange={setTab} />}
       />
 
-      <div className="mt-4 px-2 pb-3">
+      <div className="py-1">
         {loading ? (
-          <div className="space-y-2 px-3">
+          <div className="space-y-2 px-5 py-3">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="skeleton h-12 w-full" />
             ))}
@@ -286,31 +350,37 @@ function ObservationSnapshots() {
               return (
                 <li
                   key={p.id}
-                  className="flex items-center justify-between gap-4 border-b border-zinc-800 px-3 py-3 transition-colors duration-150 last:border-0 hover:bg-zinc-800/30"
+                  className="flex items-center justify-between gap-4 border-b border-border-subtle/60 px-5 py-3 transition-colors duration-150 last:border-0 hover:bg-surface-container-low/60"
                 >
                   {/* Left: identity */}
                   <div className="flex min-w-0 items-center gap-2.5">
-                    {p.probability != null ? (
-                      up ? (
-                        <IconArrowUp width={15} height={15} className="shrink-0 text-emerald-400" />
-                      ) : (
-                        <IconArrowDown width={15} height={15} className="shrink-0 text-rose-400" />
-                      )
-                    ) : (
-                      <IconClock width={15} height={15} className="shrink-0 text-zinc-600" />
-                    )}
+                    <span
+                      className={`material-symbols-outlined text-[16px] ${
+                        p.probability == null
+                          ? "text-on-surface-variant/40"
+                          : up
+                            ? "text-primary-container"
+                            : "text-error"
+                      }`}
+                    >
+                      {p.probability == null
+                        ? "schedule"
+                        : up
+                          ? "trending_up"
+                          : "trending_down"}
+                    </span>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-white">
+                      <div className="label-caps text-[12px] text-on-surface">
                         {marketLabel(p)}
                       </div>
-                      <div className="text-[11px] text-zinc-500">
+                      <div className="label-caps-sm mt-1 text-on-surface-variant/70">
                         {isOpen
-                          ? `seen ${p.recorded_at ? timeAgo(p.recorded_at) : "--"}`
+                          ? `SEEN ${p.recorded_at ? timeAgo(p.recorded_at).toUpperCase() : "--"}`
                           : p.prediction_correct == null
-                            ? "unmodeled snapshot"
+                            ? "UNMODELED"
                             : p.prediction_correct
-                              ? "correct"
-                              : "wrong"}
+                              ? "CORRECT"
+                              : "WRONG"}
                       </div>
                     </div>
                   </div>
@@ -318,29 +388,29 @@ function ObservationSnapshots() {
                   {/* Right: metrics */}
                   <div className="flex shrink-0 items-center gap-4">
                     <div className="text-right">
-                      <div className="tabular text-sm font-semibold text-white">
+                      <div className="tabular text-sm font-semibold text-on-surface">
                         {pct(p.probability)}
                       </div>
                       <div
-                        className={`tabular text-[11px] ${
+                        className={`label-caps-sm tabular mt-0.5 ${
                           edge == null
-                            ? "text-zinc-600"
+                            ? "text-on-surface-variant/40"
                             : edge > 0
-                              ? "text-emerald-400"
-                              : "text-rose-400"
+                              ? "text-primary-container"
+                              : "text-error"
                         }`}
                       >
-                        edge {signed(edge, 1)}
+                        EDGE {signed(edge, 1)}
                       </div>
                     </div>
                     {p.probability != null && p.predicted_outcome ? (
                       <OutcomePill outcome={p.predicted_outcome as "YES" | "NO"} />
                     ) : (
-                      <span className="inline-flex h-5 items-center rounded-full bg-zinc-800 px-2 text-[11px] text-zinc-500">
-                        warmup
+                      <span className="label-caps-sm inline-flex h-5 items-center rounded-sm border border-border-subtle bg-surface-container px-2 text-on-surface-variant/60">
+                        WARMUP
                       </span>
                     )}
-                    <div className="tabular hidden w-10 text-right text-[13px] text-zinc-400 sm:block">
+                    <div className="tabular hidden w-10 text-right text-[13px] text-on-surface-variant sm:block">
                       {p.brier_score != null ? p.brier_score.toFixed(2) : "--"}
                     </div>
                   </div>
@@ -351,12 +421,12 @@ function ObservationSnapshots() {
         )}
       </div>
 
-      <div className="border-t border-zinc-800 px-5 py-3">
+      <div className="border-t border-border-subtle px-5 py-3">
         <Link
           href="/predictions"
-          className="text-[13px] font-medium text-amber-500 hover:text-amber-400 hover:underline"
+          className="label-caps text-primary-container transition-colors hover:text-primary-fixed-dim"
         >
-          View all predictions →
+          View All Predictions →
         </Link>
       </div>
     </Card>
@@ -391,19 +461,20 @@ function ResolutionFeed() {
     <Card>
       <CardHeader
         title="Resolution Feed"
+        icon="fact_check"
         actions={
           <Link
             href="/resolution"
-            className="text-[13px] font-medium text-amber-500 hover:text-amber-400 hover:underline"
+            className="label-caps text-primary-container transition-colors hover:text-primary-fixed-dim"
           >
             View All
           </Link>
         }
       />
 
-      <div className="mt-3 px-5 pb-5">
+      <div className="px-5 py-2">
         {loading ? (
-          <div className="space-y-4">
+          <div className="space-y-4 py-3">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="skeleton h-16 w-full" />
             ))}
@@ -414,46 +485,43 @@ function ResolutionFeed() {
             hint="Markets resolve ~1 minute after their 15-minute window closes."
           />
         ) : (
-          <ul className="divide-y divide-zinc-800">
+          <ul>
             {resolved.map((p) => {
               const correct = p.prediction_correct === true;
               const actualYes = p.outcome_resolution === "yes_won";
               return (
-                <li key={p.id} className="flex items-start gap-3 py-3.5">
+                <li
+                  key={p.id}
+                  className="flex items-start gap-3 border-b border-border-subtle/60 py-3.5 last:border-0"
+                >
                   <span
-                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                      correct
-                        ? "bg-emerald-500/15 text-emerald-400"
-                        : "bg-rose-500/15 text-rose-400"
+                    className={`material-symbols-outlined ms-fill mt-0.5 text-[16px] ${
+                      correct ? "text-primary-container" : "text-error"
                     }`}
                   >
-                    {correct ? (
-                      <IconCheck width={12} height={12} />
-                    ) : (
-                      <IconX width={12} height={12} />
-                    )}
+                    {correct ? "check_circle" : "cancel"}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-white">
+                      <span className="label-caps text-[12px] text-on-surface">
                         {marketLabel(p)}
                       </span>
-                      <span className="shrink-0 text-[11px] text-zinc-500">
-                        {timeAgo(p.resolved_at!)}
+                      <span className="label-caps-sm shrink-0 text-on-surface-variant/70">
+                        {timeAgo(p.resolved_at!).toUpperCase()}
                       </span>
                     </div>
-                    <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-400">
+                    <div className="label-caps-sm mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-on-surface-variant">
                       <span>
-                        Predicted{" "}
-                        <span className="font-medium text-zinc-200">
-                          {p.predicted_outcome || "--"}
+                        PRED{" "}
+                        <span className="font-semibold text-on-surface-variant">
+                          {p.predicted_outcome === "YES" ? "UP" : "DOWN"}
                         </span>
                       </span>
                       <span>
-                        Actual{" "}
+                        ACTUAL{" "}
                         <span
-                          className={`font-medium ${
-                            actualYes ? "text-emerald-400" : "text-rose-400"
+                          className={`font-semibold ${
+                            actualYes ? "text-primary-container" : "text-error"
                           }`}
                         >
                           {actualYes ? "UP" : "DOWN"}
@@ -462,10 +530,12 @@ function ResolutionFeed() {
                     </div>
                   </div>
                   <div className="tabular shrink-0 text-right">
-                    <div className="text-[13px] font-semibold text-zinc-200">
+                    <div className="text-[13px] font-semibold text-on-surface">
                       {p.brier_score != null ? p.brier_score.toFixed(2) : "--"}
                     </div>
-                    <div className="text-[10px] text-zinc-500">brier</div>
+                    <div className="label-caps-sm text-on-surface-variant/60">
+                      BRIER
+                    </div>
                   </div>
                 </li>
               );
@@ -484,14 +554,7 @@ function ResolutionFeed() {
 export default function OverviewPage() {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-[28px] font-bold leading-tight text-white">
-          Overview
-        </h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Observation Run 001 — model health, live market and resolution quality.
-        </p>
-      </div>
+      <PageHeader />
 
       <StatsRow />
 

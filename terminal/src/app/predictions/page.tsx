@@ -3,8 +3,13 @@
 import { Fragment, useMemo, useState } from "react";
 import { usePredictions } from "@/hooks/useBayseData";
 import type { Prediction } from "@/lib/api";
-import { Card, CardHeader, PillToggle, EmptyState } from "@/components/ui";
-import { IconCheck, IconX } from "@/components/Icons";
+import {
+  Card,
+  CardHeader,
+  PillToggle,
+  StatusBadge,
+  EmptyState,
+} from "@/components/ui";
 
 const FILTERS = ["All", "Pending", "Resolved"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -35,21 +40,33 @@ const mmss = (s: number | null | undefined) =>
     ? "--"
     : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+function Detail({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex justify-between gap-3 text-[13px]">
-      <span className="text-zinc-500">{label}</span>
-      <span className="tabular font-medium text-zinc-200">{children}</span>
+    <div className="flex justify-between gap-3 py-1">
+      <span className="label-caps-sm text-on-surface-variant/70">{label}</span>
+      <span className="tabular text-[13px] font-medium text-on-surface-variant">
+        {children}
+      </span>
     </div>
   );
 }
 
-function DetailGroup({ title, children }: { title: string; children: React.ReactNode }) {
+function DetailGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="space-y-2">
-      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-        {title}
-      </h4>
+    <div className="space-y-1.5">
+      <h4 className="label-caps-sm mb-2 text-primary-container">{title}</h4>
       {children}
     </div>
   );
@@ -57,22 +74,28 @@ function DetailGroup({ title, children }: { title: string; children: React.React
 
 function ExpandedDetail({ pred }: { pred: Prediction }) {
   return (
-    <tr className="border-b border-zinc-800 bg-zinc-950/50">
+    <tr className="border-b border-border-subtle bg-surface-container-lowest/60">
       <td colSpan={9} className="px-5 py-4">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           <DetailGroup title="Decision">
             <Detail label="Pick">
-              {pred.predicted_outcome || "—"}
+              {pred.predicted_outcome === "YES"
+                ? "UP"
+                : pred.predicted_outcome === "NO"
+                  ? "DOWN"
+                  : "—"}
             </Detail>
             <Detail label="Probability">{pct(pred.probability)}</Detail>
-            <Detail label="Signal strength">{pred.signal_strength.toFixed(3)}</Detail>
+            <Detail label="Signal strength">
+              {pred.signal_strength.toFixed(3)}
+            </Detail>
             <Detail label="Approved">{pred.approved ? "Yes" : "No"}</Detail>
             {pred.reasons && pred.reasons.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
+              <div className="flex flex-wrap gap-1.5 pt-2">
                 {pred.reasons.map((r, i) => (
                   <span
                     key={i}
-                    className="rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-400"
+                    className="label-caps-sm rounded-sm border border-border-subtle bg-surface-container px-2 py-1 text-on-surface-variant"
                   >
                     {r}
                   </span>
@@ -102,9 +125,11 @@ function ExpandedDetail({ pred }: { pred: Prediction }) {
             <Detail label="Above strike">
               {pred.is_above_strike ? "Yes" : "No"}
             </Detail>
-            <Detail label="Realized vol">{pred.realized_volatility.toFixed(4)}%</Detail>
+            <Detail label="Realized vol">
+              {pred.realized_volatility.toFixed(4)}%
+            </Detail>
             <Detail label="Momentum">{pred.momentum_pct.toFixed(4)}%</Detail>
-            <Detail label="Yes / No ask">
+            <Detail label="Ask Y / N">
               {pred.yes_ask?.toFixed(2) ?? "--"} / {pred.no_ask?.toFixed(2) ?? "--"}
             </Detail>
             <Detail label="Spread">{pred.spread?.toFixed(4) ?? "--"}</Detail>
@@ -137,8 +162,10 @@ export default function PredictionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-[28px] font-bold leading-tight text-white">Predictions</h1>
-        <p className="mt-1 text-sm text-zinc-400">
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-on-surface">
+          Predictions
+        </h1>
+        <p className="mt-1.5 text-sm text-on-surface-variant">
           Every snapshot the engine has recorded. Click a row for full context.
         </p>
       </div>
@@ -147,12 +174,13 @@ export default function PredictionsPage() {
         <CardHeader
           title="Snapshot History"
           subtitle={`${rows.length} snapshots${filter !== "All" ? ` · ${filter.toLowerCase()}` : ""}`}
+          icon="query_stats"
           actions={<PillToggle options={FILTERS} value={filter} onChange={setFilter} />}
         />
 
-        <div className="mt-4 px-2 pb-3">
+        <div className="py-1">
           {loading ? (
-            <div className="space-y-2 px-3">
+            <div className="space-y-2 px-5 py-3">
               {[...Array(8)].map((_, i) => (
                 <div key={i} className="skeleton h-11 w-full" />
               ))}
@@ -164,21 +192,21 @@ export default function PredictionsPage() {
             />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
-                    <th className="pb-2 pl-3 pr-4 font-semibold">Market</th>
-                    <th className="pb-2 pr-4 font-semibold">Time</th>
-                    <th className="pb-2 pr-4 font-semibold">Pick</th>
-                    <th className="pb-2 pr-4 font-semibold">Prob</th>
-                    <th className="pb-2 pr-4 font-semibold">Edge</th>
-                    <th className="pb-2 pr-4 font-semibold">Strike / BTC</th>
-                    <th className="pb-2 pr-4 font-semibold">Left</th>
-                    <th className="pb-2 pr-4 font-semibold">Result</th>
-                    <th className="pb-2 w-6" />
+                  <tr className="label-caps-sm border-b border-border-subtle bg-surface-container-low text-on-surface-variant">
+                    <th className="py-2.5 pl-5 pr-4 font-medium">Market</th>
+                    <th className="py-2.5 pr-4 font-medium">Time</th>
+                    <th className="py-2.5 pr-4 font-medium">Pick</th>
+                    <th className="py-2.5 pr-4 font-medium">Prob</th>
+                    <th className="py-2.5 pr-4 font-medium">Edge</th>
+                    <th className="py-2.5 pr-4 font-medium">Strike / BTC</th>
+                    <th className="py-2.5 pr-4 font-medium">Left</th>
+                    <th className="py-2.5 pr-4 font-medium">Result</th>
+                    <th className="w-6 py-2.5 pr-5" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800">
+                <tbody>
                   {rows.map((pred) => {
                     const hasModel = pred.probability != null;
                     const isPending = pred.outcome_resolution === "pending";
@@ -188,74 +216,66 @@ export default function PredictionsPage() {
                       <Fragment key={pred.id}>
                         <tr
                           onClick={() => setExpandedId(expanded ? null : pred.id)}
-                          className="cursor-pointer transition-colors hover:bg-zinc-800/30"
+                          className="cursor-pointer border-b border-border-subtle/60 transition-colors hover:bg-surface-container-low/70"
                         >
-                          <td className="py-2.5 pl-3 pr-4 font-medium text-white">
+                          <td className="label-caps py-2.5 pl-5 pr-4 text-[12px] text-on-surface">
                             {marketLabel(pred)}
                           </td>
-                          <td className="tabular py-2.5 pr-4 text-xs text-zinc-400">
+                          <td className="tabular py-2.5 pr-4 text-xs text-on-surface-variant">
                             {new Date(pred.recorded_at).toLocaleTimeString()}
                           </td>
                           <td className="py-2.5 pr-4">
                             {hasModel ? (
                               <span
-                                className={`text-xs font-semibold ${
+                                className={`label-caps-sm ${
                                   pred.predicted_outcome === "YES"
-                                    ? "text-emerald-400"
-                                    : "text-rose-400"
+                                    ? "text-primary-container"
+                                    : "text-error"
                                 }`}
                               >
                                 {pred.predicted_outcome === "YES" ? "UP" : "DOWN"}
                               </span>
                             ) : (
-                              <span className="text-xs text-zinc-600">warmup</span>
+                              <span className="label-caps-sm text-on-surface-variant/40">
+                                WARMUP
+                              </span>
                             )}
                           </td>
-                          <td className="tabular py-2.5 pr-4 text-zinc-300">
+                          <td className="tabular py-2.5 pr-4 text-[13px] text-on-surface-variant">
                             {pct(pred.probability)}
                           </td>
                           <td
-                            className={`tabular py-2.5 pr-4 ${
+                            className={`tabular py-2.5 pr-4 text-[13px] ${
                               pred.edge == null
-                                ? "text-zinc-600"
+                                ? "text-on-surface-variant/40"
                                 : pred.edge > 0
-                                  ? "text-emerald-400"
-                                  : "text-rose-400"
+                                  ? "text-primary-container"
+                                  : "text-error"
                             }`}
                           >
                             {signed(pred.edge, 3)}
                           </td>
-                          <td className="tabular py-2.5 pr-4 text-xs text-zinc-400">
+                          <td className="tabular py-2.5 pr-4 text-xs text-on-surface-variant">
                             ${pred.strike_price.toLocaleString()} / $
                             {pred.current_btc_price.toLocaleString()}
                           </td>
-                          <td className="tabular py-2.5 pr-4 text-zinc-400">
+                          <td className="tabular py-2.5 pr-4 text-xs text-on-surface-variant">
                             {mmss(pred.seconds_remaining)}
                           </td>
                           <td className="py-2.5 pr-4">
                             {isPending ? (
-                              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400">
-                                Pending
-                              </span>
+                              <StatusBadge status="pending" />
                             ) : !hasModel ? (
-                              <span className="text-[11px] text-zinc-600">unmodeled</span>
-                            ) : (
-                              <span
-                                className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                                  isCorrect
-                                    ? "bg-emerald-500/15 text-emerald-400"
-                                    : "bg-rose-500/15 text-rose-400"
-                                }`}
-                              >
-                                {isCorrect ? (
-                                  <IconCheck width={11} height={11} />
-                                ) : (
-                                  <IconX width={11} height={11} />
-                                )}
+                              <span className="label-caps-sm text-on-surface-variant/40">
+                                UNMODELED
                               </span>
+                            ) : (
+                              <StatusBadge
+                                status={isCorrect ? "correct" : "wrong"}
+                              />
                             )}
                           </td>
-                          <td className="py-2.5 pr-3 text-right text-[10px] text-zinc-600">
+                          <td className="py-2.5 pr-5 text-right text-[10px] text-on-surface-variant/50">
                             {expanded ? "▲" : "▼"}
                           </td>
                         </tr>

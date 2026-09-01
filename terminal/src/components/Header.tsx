@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { IconSearch, IconBell, IconMenu } from "./Icons";
 import { useCalibration } from "@/hooks/useBayseData";
 
 const ROUTE_NAMES: Record<string, string> = {
@@ -23,6 +22,7 @@ export function Header({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const pageName = ROUTE_NAMES[pathname] ?? "Overview";
   const pending = calibration?.pending ?? 0;
@@ -45,6 +45,19 @@ export function Header({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
+  // ⌘K / Ctrl+K focuses the search
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        setSearchOpen(true);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function navigateTo(href: string) {
     setSearchOpen(false);
     setQuery("");
@@ -52,31 +65,44 @@ export function Header({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-zinc-800/60 bg-[#09090b]/90 px-4 backdrop-blur-sm md:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border-subtle bg-background/80 px-4 backdrop-blur-md md:px-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-3">
         <button
           onClick={onOpenMobileNav}
           aria-label="Open menu"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white md:hidden"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface md:hidden"
         >
-          <IconMenu width={18} height={18} />
+          <span className="material-symbols-outlined text-[18px]">menu</span>
         </button>
-        <nav aria-label="Breadcrumb" className="hidden items-center gap-1.5 text-[13px] sm:flex">
-          <Link href="/" className="text-zinc-400 transition-colors hover:text-zinc-200">
-            Dashboard
+        <nav
+          aria-label="Breadcrumb"
+          className="hidden items-center gap-1.5 sm:flex"
+        >
+          <Link
+            href="/"
+            className="label-caps text-on-surface-variant transition-colors hover:text-primary-container"
+          >
+            Baysed
           </Link>
-          <span className="text-zinc-600" aria-hidden>/</span>
-          <span className="font-medium text-white">{pageName}</span>
+          <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50">
+            chevron_right
+          </span>
+          <span className="label-caps font-bold tracking-widest text-primary-container">
+            {pageName}
+          </span>
         </nav>
       </div>
 
       {/* Search + bell + avatar */}
       <div className="flex items-center gap-3">
         <div ref={searchRef} className="relative">
-          <div className="flex h-9 w-44 items-center gap-2 rounded-full border border-zinc-700 bg-zinc-800 px-3.5 transition-colors duration-150 focus-within:border-amber-500 sm:w-60">
-            <IconSearch width={15} height={15} className="shrink-0 text-zinc-500" />
+          <div className="flex h-9 w-44 items-center rounded-full border border-border-subtle bg-surface-container-lowest pl-3 pr-2 transition-colors duration-150 focus-within:border-primary-container/60 sm:w-60">
+            <span className="material-symbols-outlined text-[15px] text-primary-container/50">
+              search
+            </span>
             <input
+              ref={inputRef}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -84,26 +110,39 @@ export function Header({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
               }}
               onFocus={() => setSearchOpen(true)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && matches.length > 0) navigateTo(matches[0][0]);
+                if (e.key === "Enter" && matches.length > 0)
+                  navigateTo(matches[0][0]);
                 if (e.key === "Escape") setSearchOpen(false);
               }}
-              placeholder="Search..."
+              placeholder="SEARCH..."
               aria-label="Search pages"
-              className="w-full bg-transparent text-[13px] text-white placeholder-zinc-500 outline-none"
+              className="label-caps w-full bg-transparent pl-2 text-primary-container/90 placeholder:text-primary-container/30 outline-none"
             />
+            <span className="label-caps-sm hidden gap-1 md:flex">
+              <kbd className="rounded border border-border-subtle bg-surface-container px-1.5 py-0.5 text-[9px] text-on-surface-variant">
+                ⌘
+              </kbd>
+              <kbd className="rounded border border-border-subtle bg-surface-container px-1.5 py-0.5 text-[9px] text-on-surface-variant">
+                K
+              </kbd>
+            </span>
           </div>
 
           {searchOpen && (
-            <div className="absolute right-0 top-11 w-52 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+            <div className="glass-card absolute right-0 top-11 w-52 overflow-hidden rounded-lg py-1 shadow-xl">
               {matches.length === 0 ? (
-                <p className="px-3.5 py-2 text-xs text-zinc-500">No matches</p>
+                <p className="label-caps-sm px-3.5 py-2.5 text-on-surface-variant/60">
+                  No matches
+                </p>
               ) : (
                 matches.map(([href, name]) => (
                   <button
                     key={href}
                     onClick={() => navigateTo(href)}
-                    className={`block w-full px-3.5 py-2 text-left text-[13px] transition-colors hover:bg-zinc-800 ${
-                      pathname === href ? "text-amber-400" : "text-zinc-300"
+                    className={`label-caps block w-full px-3.5 py-2 text-left transition-colors hover:bg-surface-container-high ${
+                      pathname === href
+                        ? "text-primary-container"
+                        : "text-on-surface-variant hover:text-on-surface"
                     }`}
                   >
                     {name}
@@ -117,18 +156,20 @@ export function Header({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         <Link
           href="/resolution"
           aria-label={`Resolution feed, ${pending} pending`}
-          className="relative flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+          className="relative flex h-8 w-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
         >
-          <IconBell width={18} height={18} />
+          <span className="material-symbols-outlined text-[18px]">
+            notifications
+          </span>
           {pending > 0 && (
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#09090b]" />
+            <span className="absolute right-1 top-1 h-2 w-2 animate-pulse rounded-full bg-primary-container" />
           )}
         </Link>
 
         <Link
           href="/settings"
           aria-label="Settings"
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-semibold text-zinc-300 transition-colors hover:border-amber-500/50 hover:text-amber-400"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-primary-container/30 bg-primary-container/10 text-xs font-bold text-primary-container transition-colors hover:bg-primary-container/20"
         >
           B
         </Link>
