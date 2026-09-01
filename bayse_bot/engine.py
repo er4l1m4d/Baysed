@@ -84,22 +84,36 @@ class Bot:
         # Check for resolved predictions first
         await self._check_resolutions()
 
-        # Resolve the current interval through the dedicated lean-series index.
-        # Never fall back to scanning the full catalog: that path can exceed the
-        # cycle transaction timeout and roll back otherwise valid predictions.
+        # Both sources are bounded to this BTC series. Never scan the full
+        # catalog: that path can exceed the cycle timeout and roll back writes.
         events = []
+        discovery_errors: list[str] = []
         try:
-            event = await self.client.current_series_event(self.s.series_slug)
-            if event:
-                events = [event]
-                log.info("scan: current series=%s event=%s", self.s.series_slug, event.get("id"))
+            events = await self.client.events_by_series(self.s.series_slug)
         except Exception as exc:
-            log.warning("current series discovery failed: %s: %s", type(exc).__name__, exc)
+            discovery_errors.append(f"filtered: {type(exc).__name__}: {exc}")
+
+        if not events:
+            try:
+                event = await self.client.current_series_event(self.s.series_slug)
+                if event:
+                    events = [event]
+            except Exception as exc:
+                discovery_errors.append(f"lean: {type(exc).__name__}: {exc}")
+
+        discovery_error = "; ".join(discovery_errors) or None
+        if events:
+            log.info("scan: series=%s -> %d current events", self.s.series_slug, len(events))
+        elif discovery_error:
+            log.warning("series discovery failed: %s", discovery_error)
+        else:
+            log.warning("series discovery returned no current event")
 
         try:
             from api.shared import bot_diagnostics
             bot_diagnostics["discovered_events"] = len(events)
             bot_diagnostics["discovered_markets"] = sum(len(event.get("markets", [])) for event in events)
+            bot_diagnostics["discovery_error"] = discovery_error
             bot_diagnostics["last_discovery_at"] = datetime.now(timezone.utc).isoformat()
         except ImportError:
             pass

@@ -15,6 +15,7 @@ bot_diagnostics: dict = {
     "cycles": 0,
     "discovered_events": 0,
     "discovered_markets": 0,
+    "discovery_error": None,
     "last_discovery_at": None,
     "last_prediction_at": None,
     "last_resolution_at": None,
