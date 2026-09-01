@@ -305,6 +305,7 @@ async def pipeline_health(db: AsyncSession = Depends(get_db)):
             "events": bot_diagnostics.get("discovered_events", 0),
             "markets": bot_diagnostics.get("discovered_markets", 0),
             "error": bot_diagnostics.get("discovery_error"),
+            "slug": bot_diagnostics.get("discovery_slug"),
             "last_at": bot_diagnostics.get("last_discovery_at"),
         },
         "live_market": {

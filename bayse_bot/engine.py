@@ -86,16 +86,21 @@ class Bot:
 
         # Both sources are bounded to this BTC series. Never scan the full
         # catalog: that path can exceed the cycle timeout and roll back writes.
+        # Uses a fresh HTTP client per cycle — matches /debug/discovery behavior
+        # exactly and eliminates any long-lived session state issues.
         events = []
         discovery_errors: list[str] = []
+        from .bayse import BayseClient as _Client
         try:
-            events = await self.client.events_by_series(self.s.series_slug)
+            async with _Client(self.s.bayse_base_url, self.s.public_key or "", self.s.secret_key or "") as client:
+                events = await client.events_by_series(self.s.series_slug)
         except Exception as exc:
             discovery_errors.append(f"filtered: {type(exc).__name__}: {exc}")
 
         if not events:
             try:
-                event = await self.client.current_series_event(self.s.series_slug)
+                async with _Client(self.s.bayse_base_url, self.s.public_key or "", self.s.secret_key or "") as client:
+                    event = await client.current_series_event(self.s.series_slug)
                 if event:
                     events = [event]
             except Exception as exc:
@@ -107,13 +112,14 @@ class Bot:
         elif discovery_error:
             log.warning("series discovery failed: %s", discovery_error)
         else:
-            log.warning("series discovery returned no current event")
+            log.warning("series discovery returned no current event for slug=%r", self.s.series_slug)
 
         try:
             from api.shared import bot_diagnostics
             bot_diagnostics["discovered_events"] = len(events)
             bot_diagnostics["discovered_markets"] = sum(len(event.get("markets", [])) for event in events)
             bot_diagnostics["discovery_error"] = discovery_error
+            bot_diagnostics["discovery_slug"] = self.s.series_slug
             bot_diagnostics["last_discovery_at"] = datetime.now(timezone.utc).isoformat()
         except ImportError:
             pass
