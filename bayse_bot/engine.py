@@ -317,7 +317,10 @@ class Bot:
                 )
                 canonical_events = [
                     event for event in historical
-                    if isinstance(event, dict) and event.get("status") == "resolved"
+                    if isinstance(event, dict) and any(
+                        market.get("resolvedOutcomeId") or market.get("resolved_outcome_id")
+                        for market in event.get("markets", [])
+                    )
                 ]
                 aged_count, aged_market_ids = await self.resolver.resolve_from_events(canonical_events)
                 resolved_count += aged_count

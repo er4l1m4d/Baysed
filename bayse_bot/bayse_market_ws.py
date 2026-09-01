@@ -326,17 +326,11 @@ class BayseMarketFeed:
         """Rotate subscriptions to the currently open event and its markets."""
         target_events = {event_id} if event_id else set()
         target_markets = set(market_ids)
-        old_events = self.subscribed_events - target_events
-        old_markets = self.subscribed_markets - target_markets
         new_events = target_events - self.subscribed_events
         new_markets = list(target_markets - self.subscribed_markets)
 
         ws = self._ws
         if ws is not None:
-            for old_event in old_events:
-                await ws.send(json.dumps({"type": "unsubscribe", "room": f"prices:{old_event}"}))
-            for old_market in old_markets:
-                await ws.send(json.dumps({"type": "unsubscribe", "room": f"orderbook:{old_market}"}))
             for new_event in new_events:
                 await ws.send(json.dumps({"type": "subscribe", "channel": "prices", "eventId": new_event}))
             for offset in range(0, len(new_markets), 10):

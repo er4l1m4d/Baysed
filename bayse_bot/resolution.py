@@ -5,7 +5,7 @@ a `resolvedOutcomeId` on each market. This module:
 1. Queries resolved events from Bayse
 2. Matches them against pending predictions using resolvedOutcomeId (canonical)
 3. Saves immutable MarketOutcome record (one per market)
-4. Updates the LATEST prediction snapshot with the actual outcome
+4. Updates every prediction snapshot with the actual outcome
 5. Calculates Brier score as (predicted_prob - actual_outcome)^2
 
 The MarketOutcome is the canonical resolution record — once saved, it never
@@ -13,9 +13,8 @@ changes. Predictions reference it via market_id for calibration.
 
 Resolution is transactional: BEGIN, save outcome, update prediction, COMMIT.
 
-Additionally, for predictions on markets whose closes_at is in the past but
-that don't appear in the latest resolved events batch (aged out of API pagination),
-we resolve using BTC price at close time vs strike price (same source Bayse uses).
+Predictions outside the latest resolved-events page are resolved from their
+canonical Bayse event-detail response.
 """
 from __future__ import annotations
 import logging
@@ -44,8 +43,7 @@ class ResolutionTracker:
 
         For each resolved market:
         - Save immutable MarketOutcome (idempotent, one per market)
-        - Update the LATEST prediction snapshot with resolution data
-        - Leave older snapshots as historical records
+        - Update every pending prediction snapshot with resolution data
         """
         if not resolved_events:
             return 0, []

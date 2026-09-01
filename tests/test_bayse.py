@@ -1,5 +1,7 @@
 import hashlib
-from bayse_bot.bayse import canonical_json_bytes,sign_request,parse_quote
+import asyncio
+
+from bayse_bot.bayse import BayseClient, canonical_json_bytes,sign_request,parse_quote
 from bayse_bot.models import Outcome
 
 def test_canonical_body_and_fixed_signature():
@@ -15,3 +17,24 @@ def test_quote_requires_documented_clob_fields():
     try: parse_quote({"price":.5},"BUY",Outcome.YES)
     except ValueError: pass
     else: assert False
+
+
+def test_open_event_discovery_is_public_even_when_client_has_keys():
+    async def run():
+        client = BayseClient("https://example.test", "public", "secret")
+        calls = []
+
+        async def request(method, path, body=None, authenticated=False, signed=False, retries=2):
+            calls.append((method, path, authenticated, signed))
+            return {"events": []}
+
+        client.request = request
+        await client.events_by_series("crypto-btc-15min")
+        await client.events()
+        return calls
+
+    calls = asyncio.run(run())
+    assert calls == [
+        ("GET", "/v1/pm/events?seriesSlug=crypto-btc-15min&status=open", False, False),
+        ("GET", "/v1/pm/events?status=open", False, False),
+    ]

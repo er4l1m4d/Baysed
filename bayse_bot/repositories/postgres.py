@@ -147,7 +147,9 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
         from api.models import Prediction
         async with self._session() as s:
             result = await s.execute(
-                select(Prediction).where(Prediction.outcome_resolution == "pending")
+                select(Prediction)
+                .where(Prediction.outcome_resolution == "pending")
+                .order_by(Prediction.closes_at.desc(), Prediction.recorded_at.desc())
             )
             return [self._to_dict(p) for p in result.scalars().all()]
 
