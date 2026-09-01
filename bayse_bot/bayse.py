@@ -79,7 +79,7 @@ class BayseClient:
         return self._event_list(await self.request("GET", f"/v1/pm/events?seriesSlug={slug}&status=open"))
     async def event(self, event_id: str) -> dict[str, Any]:
         """Fetch one event by ID, including canonical resolution fields."""
-        raw = await self.request("GET", f"/v1/pm/events/{event_id}", authenticated=bool(self.public_key), retries=0)
+        raw = await self.request("GET", f"/v1/pm/events/{event_id}", retries=0)
         return raw.get("event", raw.get("data", raw))
     async def resolved_events(self, series_slug: str | None = None) -> list[dict[str, Any]]:
         """Fetch resolved events, optionally filtered by series. Used for outcome tracking."""
@@ -99,6 +99,28 @@ class BayseClient:
         raw = await self.request("GET", f"/v1/pm/events/series/{slug}/lean-events")
         if isinstance(raw, list): return raw
         return raw.get("events", raw.get("data", []))
+    async def current_series_event(self, slug: str) -> dict[str, Any] | None:
+        """Fetch the full event for the series interval that is open now."""
+        now = datetime.now(timezone.utc)
+        lean_events = await self.series_events(slug)
+        current: list[tuple[datetime, str]] = []
+        for event in lean_events:
+            event_id = event.get("id")
+            opens_raw = event.get("openingDate") or event.get("startDate")
+            closes_raw = event.get("closingDate")
+            if not event_id or not opens_raw or not closes_raw:
+                continue
+            try:
+                opens_at = datetime.fromisoformat(opens_raw.replace("Z", "+00:00"))
+                closes_at = datetime.fromisoformat(closes_raw.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if opens_at <= now < closes_at:
+                current.append((closes_at, event_id))
+        if not current:
+            return None
+        _, event_id = min(current)
+        return await self.event(event_id)
     async def trades(self, market_id: str) -> list[dict[str, Any]]:
         """Fetch recent trades for a market."""
         raw = await self.request("GET", f"/v1/pm/trades?marketId={market_id}")

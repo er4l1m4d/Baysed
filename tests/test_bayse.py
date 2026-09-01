@@ -1,5 +1,6 @@
 import hashlib
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 from bayse_bot.bayse import BayseClient, canonical_json_bytes,sign_request,parse_quote
 from bayse_bot.models import Outcome
@@ -38,3 +39,34 @@ def test_open_event_discovery_is_public_even_when_client_has_keys():
         ("GET", "/v1/pm/events?seriesSlug=crypto-btc-15min&status=open", False, False),
         ("GET", "/v1/pm/events?status=open", False, False),
     ]
+
+
+def test_current_series_event_fetches_only_the_open_interval():
+    async def run():
+        client = BayseClient("https://example.test", "public", "secret")
+        now = datetime.now(timezone.utc)
+        fetched = []
+
+        async def series_events(slug):
+            assert slug == "crypto-btc-15min"
+            return [
+                {"id": "closed", "openingDate": (now - timedelta(minutes=30)).isoformat(),
+                 "closingDate": (now - timedelta(minutes=15)).isoformat()},
+                {"id": "current", "openingDate": (now - timedelta(minutes=5)).isoformat(),
+                 "closingDate": (now + timedelta(minutes=10)).isoformat()},
+                {"id": "future", "openingDate": (now + timedelta(minutes=10)).isoformat(),
+                 "closingDate": (now + timedelta(minutes=25)).isoformat()},
+            ]
+
+        async def event(event_id):
+            fetched.append(event_id)
+            return {"id": event_id, "markets": [{"id": "market"}]}
+
+        client.series_events = series_events
+        client.event = event
+        result = await client.current_series_event("crypto-btc-15min")
+        return result, fetched
+
+    result, fetched = asyncio.run(run())
+    assert result["id"] == "current"
+    assert fetched == ["current"]

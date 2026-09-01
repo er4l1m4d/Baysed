@@ -84,19 +84,17 @@ class Bot:
         # Check for resolved predictions first
         await self._check_resolutions()
 
-        # Primary: series-based discovery (faster, more precise)
-        # Fallback: full event scan (if series fails or returns nothing)
+        # Resolve the current interval through the dedicated lean-series index.
+        # Never fall back to scanning the full catalog: that path can exceed the
+        # cycle transaction timeout and roll back otherwise valid predictions.
         events = []
         try:
-            events = await self.client.events_by_series(self.s.series_slug)
-            if events:
-                log.info("scan: series=%s -> %d events", self.s.series_slug, len(events))
+            event = await self.client.current_series_event(self.s.series_slug)
+            if event:
+                events = [event]
+                log.info("scan: current series=%s event=%s", self.s.series_slug, event.get("id"))
         except Exception as exc:
-            log.warning("series discovery failed: %s: %s, falling back to full scan", type(exc).__name__, exc)
-
-        if not events:
-            events = await self.client.events()
-            log.info("scan: full scan -> %d open events", len(events))
+            log.warning("current series discovery failed: %s: %s", type(exc).__name__, exc)
 
         try:
             from api.shared import bot_diagnostics
