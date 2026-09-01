@@ -1,369 +1,516 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useBotStatus, useCalibration, useLivePrice, useLiveMarketState, usePredictions, useTrades } from "@/hooks/useBayseData";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  useBotStatus,
+  useCalibration,
+  useLiveMarketState,
+  useLivePrice,
+  usePredictions,
+} from "@/hooks/useBayseData";
+import type { Prediction } from "@/lib/api";
+import { Card, CardHeader, StatCard, PillToggle, OutcomePill, EmptyState } from "@/components/ui";
+import { PerformanceCard } from "@/components/BrierChart";
+import { IconArrowUp, IconArrowDown, IconCheck, IconX, IconClock } from "@/components/Icons";
 
-function PriceCard() {
-  const { price, momentum, volatility, connected, source, lastUpdateAt, secondsSinceUpdate } = useLivePrice();
-  const { status } = useBotStatus();
+const usd = (v: number | null | undefined) =>
+  v != null
+    ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : "--";
 
-  const displayPrice = price || status?.last_btc_price;
+const pct = (v: number | null | undefined, digits = 1) =>
+  v != null ? `${(v * 100).toFixed(digits)}%` : "--";
 
-  const sourceConfig = {
-    live: {
-      label: "LIVE",
-      sublabel: "Bayse WS",
-      color: "bg-emerald-900 text-emerald-400",
-      dotColor: "bg-emerald-400 animate-pulse",
-    },
-    polling: {
-      label: "API",
-      sublabel: `Updated ${secondsSinceUpdate}s ago`,
-      color: "bg-blue-900 text-blue-400",
-      dotColor: "bg-blue-400",
-    },
-    fallback: {
-      label: "CONNECTING",
-      sublabel: "Waiting for data",
-      color: "bg-yellow-900 text-yellow-400",
-      dotColor: "bg-yellow-400 animate-pulse",
-    },
-  };
-
-  const config = sourceConfig[source];
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm text-gray-400">BTC/USD</span>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${config.dotColor}`} />
-            <span className={`text-xs px-2 py-0.5 rounded ${config.color}`}>
-              {config.label}
-            </span>
-          </div>
-          <span className="text-xs text-gray-600">{config.sublabel}</span>
-          {status?.is_running && (
-            <span className="text-xs px-2 py-0.5 rounded bg-blue-900 text-blue-400">
-              Bot Running
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="text-4xl font-bold text-white">
-        {displayPrice
-          ? `$${displayPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-          : "Loading..."}
-      </div>
-      <div className="flex gap-4 mt-2 text-xs text-gray-500">
-        <span>Momentum: {(momentum || status?.last_momentum_pct || 0).toFixed(4)}%</span>
-        <span>Vol: {(volatility || status?.last_volatility || 0).toFixed(2)}%</span>
-      </div>
-    </div>
-  );
+function signed(v: number | null | undefined, digits = 2) {
+  if (v == null) return "--";
+  return `${v > 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
 }
+
+function marketLabel(p: Prediction) {
+  if (p.closes_at) {
+    const d = new Date(p.closes_at);
+    return `BTC ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  return "BTC";
+}
+
+function timeAgo(iso: string) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Summary cards                                                       */
+/* ------------------------------------------------------------------ */
 
 function StatsRow() {
   const { calibration, loading } = useCalibration();
+  const { predictions } = usePredictions(100);
+  const { status } = useBotStatus();
 
-  if (loading) {
-    return (
-      <div className="grid grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="bg-gray-900 border border-gray-800 rounded-lg p-4 animate-pulse">
-            <div className="h-4 bg-gray-800 rounded w-20 mb-2" />
-            <div className="h-8 bg-gray-800 rounded w-16" />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  const lastHour = useMemo(() => {
+    const cutoff = Date.now() - 3600 * 1000;
+    return predictions.filter((p) => new Date(p.recorded_at).getTime() >= cutoff)
+      .length;
+  }, [predictions]);
 
-  const stats = [
-    {
-      label: "Snapshots",
-      value: String(calibration?.total_snapshots || 0),
-      color: "text-white",
-    },
-    {
-      label: "Predictions",
-      value: calibration?.prediction_coverage != null
-        ? `${calibration.total_predictions} (${(calibration.prediction_coverage * 100).toFixed(0)}%)`
-        : String(calibration?.total_predictions || 0),
-      color: "text-blue-400",
-    },
-    {
-      label: "Signals",
-      value: calibration?.signal_coverage != null
-        ? `${calibration.total_signals} (${(calibration.signal_coverage * 100).toFixed(0)}%)`
-        : String(calibration?.total_signals || 0),
-      color: "text-emerald-400",
-    },
-    {
-      label: "Resolved",
-      value: calibration?.resolved ? `${calibration.resolved} (${(calibration.accuracy || 0) * 100}%)` : "0",
-      color: "text-yellow-400",
-    },
-  ];
+  const accuracy = calibration?.accuracy ?? null;
+  const brier = calibration?.brier_mean ?? null;
 
   return (
-    <div className="grid grid-cols-4 gap-4">
-      {stats.map((stat) => (
-        <div key={stat.label} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-          <div className="text-xs text-gray-500 mb-1">{stat.label}</div>
-          <div className={`text-2xl font-bold ${stat.color}`}>{stat.value}</div>
-        </div>
-      ))}
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatCard
+        label="Total Predictions"
+        value={String(calibration?.total ?? 0)}
+        subtitle={
+          lastHour > 0
+            ? `+${lastHour} in the last hour`
+            : `strategy ${status?.strategy ?? "distance_to_strike"}`
+        }
+        dot={status?.is_running ? "green" : "red"}
+        loading={loading}
+      />
+      <StatCard
+        label="Accuracy"
+        value={accuracy != null ? pct(accuracy) : "--"}
+        subtitle={`${calibration?.correct ?? 0}/${calibration?.resolved ?? 0} correct`}
+        dot={accuracy == null ? undefined : accuracy >= 0.5 ? "green" : "red"}
+        loading={loading}
+      />
+      <StatCard
+        label="Brier Mean"
+        value={brier != null ? brier.toFixed(4) : "--"}
+        subtitle="Lower is better"
+        dot={brier == null ? undefined : brier < 0.25 ? "green" : "red"}
+        loading={loading}
+      />
+      <StatCard
+        label="Pending"
+        value={String(calibration?.pending ?? 0)}
+        subtitle="Awaiting resolution"
+        dot="gold"
+        loading={loading}
+      />
     </div>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Live market                                                         */
+/* ------------------------------------------------------------------ */
+
 function LiveMarketCard() {
   const { liveMarket, loading } = useLiveMarketState();
-  const [countdown, setCountdown] = useState<number | null>(null);
+  const { price } = useLivePrice();
+  const [now, setNow] = useState(() => Date.now());
 
-  // Live countdown: update every second from closes_at
   useEffect(() => {
-    if (!liveMarket?.closes_at || !liveMarket.is_active) {
-      setCountdown(null);
-      return;
-    }
-
-    const closesAt = new Date(liveMarket.closes_at);
-
-    function updateCountdown() {
-      const now = new Date();
-      const remaining = Math.max(0, Math.floor((closesAt.getTime() - now.getTime()) / 1000));
-      setCountdown(remaining);
-    }
-
-    updateCountdown();
-    const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
-  }, [liveMarket?.closes_at, liveMarket?.is_active]);
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
-  };
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   if (loading) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 animate-pulse">
-        <div className="h-6 bg-gray-800 rounded w-40 mb-4" />
-        <div className="grid grid-cols-3 gap-4">
-          <div className="h-16 bg-gray-800 rounded" />
-          <div className="h-16 bg-gray-800 rounded" />
-          <div className="h-16 bg-gray-800 rounded" />
+      <Card className="p-5">
+        <div className="skeleton h-5 w-28" />
+        <div className="skeleton mt-4 h-9 w-44" />
+        <div className="skeleton mt-6 h-2 w-full" />
+        <div className="mt-6 space-y-3">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="skeleton h-4 w-full" />
+          ))}
         </div>
-      </div>
+      </Card>
     );
   }
 
   if (!liveMarket || !liveMarket.is_active) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Live Market</h2>
-          <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-500">No active market</span>
-        </div>
-        <div className="text-gray-500 text-sm">Waiting for market to open...</div>
-      </div>
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-white">Live Market</h2>
+        <EmptyState
+          title="No active market"
+          hint="The next 15-minute contract opens shortly."
+        />
+      </Card>
     );
   }
 
+  const strike = liveMarket.strike_price;
+  const current = price ?? liveMarket.btc_price;
+  const distance =
+    strike != null && current != null ? (current - strike) / strike : null;
+
+  const opens = liveMarket.opens_at ? new Date(liveMarket.opens_at).getTime() : null;
+  const closes = liveMarket.closes_at ? new Date(liveMarket.closes_at).getTime() : null;
+  const remaining =
+    closes != null ? Math.max(0, Math.floor((closes - now) / 1000)) : null;
+  const progress =
+    opens != null && closes != null && closes > opens
+      ? Math.min(1, Math.max(0, (now - opens) / (closes - opens)))
+      : null;
+
+  const mmss = (s: number) =>
+    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  const stats: { label: string; value: string; tone?: "up" | "down" | "gold" }[] = [
+    { label: "Strike Price", value: usd(strike) },
+    {
+      label: "Current Price",
+      value: usd(current),
+      tone: distance == null ? undefined : distance >= 0 ? "up" : "down",
+    },
+    {
+      label: "Distance",
+      value: signed(distance, 3),
+      tone: distance == null ? undefined : distance >= 0 ? "up" : "down",
+    },
+    { label: "Model P(Up)", value: pct(liveMarket.model_probability), tone: "gold" },
+    { label: "Yes / No Ask", value: `${liveMarket.yes_ask?.toFixed(2) ?? "--"} / ${liveMarket.no_ask?.toFixed(2) ?? "--"}` },
+    { label: "Time Remaining", value: remaining != null ? mmss(remaining) : "--" },
+  ];
+
   return (
-    <div className="bg-gray-900 border border-blue-800 rounded-lg p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold">Live Market</h2>
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs px-2 py-0.5 rounded bg-emerald-900 text-emerald-400">LIVE</span>
-        </div>
+    <Card className="flex flex-col p-5">
+      <h2 className="text-base font-semibold text-white">Live Market</h2>
+
+      <p className="mt-4 text-lg font-medium text-white">
+        BTC {strike != null ? (distance != null && distance >= 0 ? ">" : "≤") : ""}{" "}
+        {usd(strike)}
+      </p>
+      <div
+        className={`tabular mt-1 text-4xl font-bold leading-none ${
+          distance == null ? "text-white" : distance >= 0 ? "text-emerald-400" : "text-rose-400"
+        }`}
+      >
+        {usd(current)}
       </div>
 
-      <div className="text-sm text-gray-400 mb-3">{liveMarket.title}</div>
-
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        <div>
-          <div className="text-xs text-gray-500">Strike</div>
-          <div className="text-lg font-mono text-white">
-            ${liveMarket.strike_price?.toLocaleString() || "--"}
-          </div>
+      {/* Time-remaining progress */}
+      <div className="mt-5">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+          <div
+            className="h-full rounded-full bg-amber-500 transition-[width] duration-1000 ease-linear"
+            style={{ width: progress != null ? `${(1 - progress) * 100}%` : "0%" }}
+          />
         </div>
-        <div>
-          <div className="text-xs text-gray-500">Time Left</div>
-          <div className={`text-lg font-mono ${countdown !== null && countdown < 120 ? "text-yellow-400" : "text-white"}`}>
-            {countdown !== null ? formatTime(countdown) : "--"}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">Signal</div>
-          <div className={`text-lg font-bold ${
-            !liveMarket.model_predicted_outcome ? "text-gray-500" :
-            liveMarket.approved ? (
-              liveMarket.model_predicted_outcome === "YES" ? "text-emerald-400" : "text-red-400"
-            ) : "text-yellow-400"
-          }`}>
-            {!liveMarket.model_predicted_outcome ? "--" :
-             liveMarket.approved ? (
-              liveMarket.model_predicted_outcome === "YES" ? "Up" : "Down"
-            ) : "Skip"}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex gap-2 mb-4">
-        <div className="flex-1 bg-emerald-900/30 border border-emerald-800 rounded px-3 py-2 text-center">
-          <div className="text-xs text-emerald-400">UP</div>
-          <div className="text-sm font-mono text-emerald-300">
-            {liveMarket.yes_ask?.toFixed(2) || "--"}
-          </div>
-        </div>
-        <div className="flex-1 bg-red-900/30 border border-red-800 rounded px-3 py-2 text-center">
-          <div className="text-xs text-red-400">DOWN</div>
-          <div className="text-sm font-mono text-red-300">
-            {liveMarket.no_ask?.toFixed(2) || "--"}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex justify-between text-xs text-gray-500">
-        <span>Model: {liveMarket.model_probability ? `${(liveMarket.model_probability * 100).toFixed(1)}%` : "--"}</span>
-        <div className="flex gap-3">
-          <span className={liveMarket.edge && liveMarket.edge > 0 ? "text-emerald-400" : "text-red-400"}>
-            Edge: {liveMarket.edge ? `${liveMarket.edge > 0 ? "+" : ""}${liveMarket.edge.toFixed(4)}` : "--"}
+        <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
+          <span className="flex items-center gap-1">
+            <IconClock width={11} height={11} />
+            {remaining != null ? mmss(remaining) : "--"} left
           </span>
-          <span className={liveMarket.edge_fee && liveMarket.edge_fee > 0 ? "text-emerald-300" : "text-red-300"}>
-            After fees: {liveMarket.edge_fee ? `${liveMarket.edge_fee > 0 ? "+" : ""}${liveMarket.edge_fee.toFixed(4)}` : "--"}
-          </span>
+          <span>closes {liveMarket.closes_at ? new Date(liveMarket.closes_at).toLocaleTimeString() : "--"}</span>
         </div>
       </div>
-    </div>
+
+      {/* Stats */}
+      <div className="mt-5 space-y-2.5">
+        {stats.map((s) => (
+          <div key={s.label} className="flex items-center justify-between text-[13px]">
+            <span className="flex items-center gap-2 text-zinc-400">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  s.tone === "up"
+                    ? "bg-emerald-500"
+                    : s.tone === "down"
+                      ? "bg-rose-500"
+                      : s.tone === "gold"
+                        ? "bg-amber-500"
+                        : "bg-zinc-600"
+                }`}
+              />
+              {s.label}
+            </span>
+            <span className="tabular font-semibold text-white">{s.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <Link
+        href="/live-market"
+        className="mt-6 flex h-10 items-center justify-center rounded-full bg-zinc-800 text-[13px] font-medium text-zinc-300 transition-colors duration-150 hover:bg-zinc-700 hover:text-white"
+      >
+        Explore Live Market →
+      </Link>
+    </Card>
   );
 }
 
-function RecentPredictions() {
-  const { predictions, loading } = usePredictions(20);
+/* ------------------------------------------------------------------ */
+/* Observation snapshots                                               */
+/* ------------------------------------------------------------------ */
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
-  };
+const SNAP_TABS = ["Open", "Closed", "All"] as const;
+type SnapTab = (typeof SNAP_TABS)[number];
 
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h2 className="text-lg font-semibold mb-4">Recent Predictions</h2>
-      {loading ? (
-        <div className="text-gray-500">Loading predictions...</div>
-      ) : predictions.length === 0 ? (
-        <div className="text-gray-500 text-sm">No predictions yet. Start the bot to collect data.</div>
-      ) : (
-        <div className="space-y-2 max-h-96 overflow-y-auto">
-          {predictions.map((pred) => (
-            <div
-              key={pred.id}
-              className="flex justify-between items-center py-2 border-b border-gray-800 text-sm"
-            >
-              <div className="flex-1">
-                <div className="text-gray-300 truncate max-w-[200px]">{pred.title}</div>
-                <div className="text-xs text-gray-600">
-                  {pred.recorded_at ? new Date(pred.recorded_at).toLocaleTimeString() : ""}
-                  {pred.seconds_remaining != null && (
-                    <span className="ml-2">{formatTime(pred.seconds_remaining)} left</span>
-                  )}
-                </div>
-              </div>
-              <div className="text-right ml-4">
-                <div className={`font-mono ${pred.predicted_outcome === "YES" ? "text-emerald-400" : "text-red-400"}`}>
-                  {pred.probability ? `${(pred.probability * 100).toFixed(1)}%` : "--"}
-                </div>
-                <div className="text-xs text-gray-600">
-                  {pred.outcome_resolution === "pending" ? (
-                    <span className="text-yellow-600">pending</span>
-                  ) : pred.outcome_resolution === "yes_won" ? (
-                    <span className="text-emerald-600">won YES</span>
-                  ) : (
-                    <span className="text-red-600">won NO</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+function ObservationSnapshots() {
+  const [tab, setTab] = useState<SnapTab>("Open");
+  const { predictions, loading } = usePredictions(30);
 
-function PositionSummary() {
-  const { status } = useBotStatus();
+  const rows = useMemo(() => {
+    if (tab === "Open") return predictions.filter((p) => p.outcome_resolution === "pending");
+    if (tab === "Closed") return predictions.filter((p) => p.outcome_resolution !== "pending");
+    return predictions;
+  }, [predictions, tab]);
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold mb-4">Bot Status</h3>
-      <div className="space-y-3">
-        <div className="flex justify-between">
-          <span className="text-gray-400">Mode</span>
-          <span className="font-mono">{status?.mode || "observation"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Strategy</span>
-          <span className="font-mono">{status?.strategy || "distance_to_strike"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Uptime</span>
-          <span className="font-mono">
-            {status?.uptime_seconds
-              ? `${Math.floor(status.uptime_seconds / 3600)}h ${Math.floor((status.uptime_seconds % 3600) / 60)}m`
-              : "0h 0m"}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Errors</span>
-          <span className="font-mono">{status?.error_count || 0}</span>
-        </div>
-        {status?.last_error && (
-          <div className="mt-2 p-2 bg-red-900/30 rounded text-xs text-red-400">
-            {status.last_error}
+    <Card>
+      <CardHeader
+        title="Observation Snapshots"
+        subtitle="Model predictions and outcomes per market window"
+        actions={<PillToggle options={SNAP_TABS} value={tab} onChange={setTab} />}
+      />
+
+      <div className="mt-4 px-2 pb-3">
+        {loading ? (
+          <div className="space-y-2 px-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="skeleton h-12 w-full" />
+            ))}
           </div>
+        ) : rows.length === 0 ? (
+          <EmptyState
+            title={tab === "Open" ? "No open snapshots" : "No snapshots yet"}
+            hint="The bot records a snapshot every scan cycle while a market is live."
+          />
+        ) : (
+          <ul>
+            {rows.slice(0, 8).map((p) => {
+              const isOpen = p.outcome_resolution === "pending";
+              const up = p.predicted_outcome === "YES";
+              const edge = p.edge;
+              return (
+                <li
+                  key={p.id}
+                  className="flex items-center justify-between gap-4 border-b border-zinc-800 px-3 py-3 transition-colors duration-150 last:border-0 hover:bg-zinc-800/30"
+                >
+                  {/* Left: identity */}
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    {p.probability != null ? (
+                      up ? (
+                        <IconArrowUp width={15} height={15} className="shrink-0 text-emerald-400" />
+                      ) : (
+                        <IconArrowDown width={15} height={15} className="shrink-0 text-rose-400" />
+                      )
+                    ) : (
+                      <IconClock width={15} height={15} className="shrink-0 text-zinc-600" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-white">
+                        {marketLabel(p)}
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        {isOpen
+                          ? `seen ${p.recorded_at ? timeAgo(p.recorded_at) : "--"}`
+                          : p.prediction_correct == null
+                            ? "unmodeled snapshot"
+                            : p.prediction_correct
+                              ? "correct"
+                              : "wrong"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: metrics */}
+                  <div className="flex shrink-0 items-center gap-4">
+                    <div className="text-right">
+                      <div className="tabular text-sm font-semibold text-white">
+                        {pct(p.probability)}
+                      </div>
+                      <div
+                        className={`tabular text-[11px] ${
+                          edge == null
+                            ? "text-zinc-600"
+                            : edge > 0
+                              ? "text-emerald-400"
+                              : "text-rose-400"
+                        }`}
+                      >
+                        edge {signed(edge, 1)}
+                      </div>
+                    </div>
+                    {p.probability != null && p.predicted_outcome ? (
+                      <OutcomePill outcome={p.predicted_outcome as "YES" | "NO"} />
+                    ) : (
+                      <span className="inline-flex h-5 items-center rounded-full bg-zinc-800 px-2 text-[11px] text-zinc-500">
+                        warmup
+                      </span>
+                    )}
+                    <div className="tabular hidden w-10 text-right text-[13px] text-zinc-400 sm:block">
+                      {p.brier_score != null ? p.brier_score.toFixed(2) : "--"}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
-    </div>
+
+      <div className="border-t border-zinc-800 px-5 py-3">
+        <Link
+          href="/predictions"
+          className="text-[13px] font-medium text-amber-500 hover:text-amber-400 hover:underline"
+        >
+          View all predictions →
+        </Link>
+      </div>
+    </Card>
   );
 }
 
-export default function Dashboard() {
-  const [tradingOpen, setTradingOpen] = useState(false);
+/* ------------------------------------------------------------------ */
+/* Resolution feed                                                     */
+/* ------------------------------------------------------------------ */
 
+function ResolutionFeed() {
+  const { predictions, loading } = usePredictions(100);
+
+  const resolved = useMemo(
+    () =>
+      predictions
+        .filter(
+          (p) =>
+            p.outcome_resolution !== "pending" &&
+            p.probability != null &&
+            p.resolved_at != null
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.resolved_at!).getTime() - new Date(a.resolved_at!).getTime()
+        )
+        .slice(0, 5),
+    [predictions]
+  );
+
+  return (
+    <Card>
+      <CardHeader
+        title="Resolution Feed"
+        actions={
+          <Link
+            href="/resolution"
+            className="text-[13px] font-medium text-amber-500 hover:text-amber-400 hover:underline"
+          >
+            View All
+          </Link>
+        }
+      />
+
+      <div className="mt-3 px-5 pb-5">
+        {loading ? (
+          <div className="space-y-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="skeleton h-16 w-full" />
+            ))}
+          </div>
+        ) : resolved.length === 0 ? (
+          <EmptyState
+            title="No resolved predictions yet"
+            hint="Markets resolve ~1 minute after their 15-minute window closes."
+          />
+        ) : (
+          <ul className="divide-y divide-zinc-800">
+            {resolved.map((p) => {
+              const correct = p.prediction_correct === true;
+              const actualYes = p.outcome_resolution === "yes_won";
+              return (
+                <li key={p.id} className="flex items-start gap-3 py-3.5">
+                  <span
+                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                      correct
+                        ? "bg-emerald-500/15 text-emerald-400"
+                        : "bg-rose-500/15 text-rose-400"
+                    }`}
+                  >
+                    {correct ? (
+                      <IconCheck width={12} height={12} />
+                    ) : (
+                      <IconX width={12} height={12} />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-white">
+                        {marketLabel(p)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-zinc-500">
+                        {timeAgo(p.resolved_at!)}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-400">
+                      <span>
+                        Predicted{" "}
+                        <span className="font-medium text-zinc-200">
+                          {p.predicted_outcome || "--"}
+                        </span>
+                      </span>
+                      <span>
+                        Actual{" "}
+                        <span
+                          className={`font-medium ${
+                            actualYes ? "text-emerald-400" : "text-rose-400"
+                          }`}
+                        >
+                          {actualYes ? "UP" : "DOWN"}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="tabular shrink-0 text-right">
+                    <div className="text-[13px] font-semibold text-zinc-200">
+                      {p.brier_score != null ? p.brier_score.toFixed(2) : "--"}
+                    </div>
+                    <div className="text-[10px] text-zinc-500">brier</div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Page                                                                */
+/* ------------------------------------------------------------------ */
+
+export default function OverviewPage() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div>
+        <h1 className="text-[28px] font-bold leading-tight text-white">
+          Overview
+        </h1>
+        <p className="mt-1 text-sm text-zinc-400">
+          Observation Run 001 — model health, live market and resolution quality.
+        </p>
+      </div>
 
-      <PriceCard />
       <StatsRow />
-      <LiveMarketCard />
-      <RecentPredictions />
 
-      {/* Collapsible Trading Section */}
-      <div className="bg-gray-900 border border-gray-800 rounded-lg">
-        <button
-          onClick={() => setTradingOpen(!tradingOpen)}
-          className="w-full flex items-center justify-between p-4 text-left"
-        >
-          <h2 className="text-lg font-semibold">Trading</h2>
-          <span className="text-gray-500 text-sm">
-            {tradingOpen ? "▲ Collapse" : "▼ Expand"}
-          </span>
-        </button>
-        {tradingOpen && (
-          <div className="px-4 pb-4 border-t border-gray-800 pt-4">
-            <PositionSummary />
-          </div>
-        )}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <PerformanceCard />
+        </div>
+        <div className="lg:col-span-2">
+          <LiveMarketCard />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <ObservationSnapshots />
+        </div>
+        <div className="lg:col-span-2">
+          <ResolutionFeed />
+        </div>
       </div>
     </div>
   );

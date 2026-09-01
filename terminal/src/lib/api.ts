@@ -129,6 +129,17 @@ export interface Calibration {
   }[];
 }
 
+export interface PipelineHealth {
+  engine: { started: boolean; cycles: number; error: string | null; init_error: string | null };
+  btc_feed: { connected: boolean; complete: boolean; connect_count: number; disconnect_count: number; last_tick_age_ms: number | null; last_error: string | null; candle_count: number };
+  market_feed: { connected: boolean; connect_count: number; disconnect_count: number; reconnect_count: number; server_error_count: number; mapping_errors: number; last_message_age_ms: number | null; subscribed_events: number; subscribed_markets: number };
+  discovery: { events: number; markets: number; error: string | null; slug: string | null; last_at: string | null };
+  live_market: { active: boolean; market_id: string | null; closes_at: string | null };
+  predictions: { total: number; modeled: number; pending: number; resolved: number; last_at: string | null };
+  resolution: { last_at: string | null; has_calibration_data: boolean };
+  api_websocket: { clients: number };
+}
+
 export interface Trade {
   id: number;
   market_id: string;
@@ -179,6 +190,10 @@ export async function getTrades(limit = 50, offset = 0): Promise<Trade[]> {
 
 export async function getLiveMarketState(): Promise<LiveMarketState> {
   return fetchApi<LiveMarketState>("/state");
+}
+
+export async function getPipelineHealth(): Promise<PipelineHealth> {
+  return fetchApi<PipelineHealth>("/pipeline-health");
 }
 
 export function connectWebSocket(
