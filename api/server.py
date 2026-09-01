@@ -327,6 +327,62 @@ async def pipeline_health(db: AsyncSession = Depends(get_db)):
     }
 
 
+@app.get("/debug/discovery")
+async def debug_discovery():
+    """Diagnose why the engine sees 0 events."""
+    import os
+    from bayse_bot.bayse import BayseClient
+
+    result = {
+        "filtered_events": None,
+        "lean_events": None,
+        "current_event": None,
+        "errors": [],
+    }
+
+    pub = os.getenv("BAYSE_PUBLIC_KEY", "")
+    sec = os.getenv("BAYSE_SECRET_KEY", "")
+    slug = "crypto-btc-15min"
+
+    try:
+        async with BayseClient("https://relay.bayse.markets", pub, sec) as client:
+            # Test 1: filtered events (same as engine's primary path)
+            try:
+                events = await client.events_by_series(slug)
+                result["filtered_events"] = {
+                    "count": len(events),
+                    "first_id": events[0].get("id") if events else None,
+                    "first_markets": len(events[0].get("markets", [])) if events else 0,
+                }
+            except Exception as e:
+                result["errors"].append(f"filtered: {type(e).__name__}: {e}")
+
+            # Test 2: lean events (same as engine's fallback)
+            try:
+                lean = await client.series_events(slug)
+                result["lean_events"] = {
+                    "count": len(lean),
+                    "first_id": lean[0].get("id") if lean else None,
+                }
+            except Exception as e:
+                result["errors"].append(f"lean: {type(e).__name__}: {e}")
+
+            # Test 3: current series event (same as engine's fallback)
+            try:
+                event = await client.current_series_event(slug)
+                result["current_event"] = {
+                    "found": event is not None,
+                    "event_id": event.get("id") if event else None,
+                    "markets": len(event.get("markets", [])) if event else 0,
+                }
+            except Exception as e:
+                result["errors"].append(f"current: {type(e).__name__}: {e}")
+    except Exception as e:
+        result["errors"].append(f"client: {type(e).__name__}: {e}")
+
+    return result
+
+
 @app.get("/debug/resolution")
 async def debug_resolution():
     """Debug endpoint to see what the resolver sees."""

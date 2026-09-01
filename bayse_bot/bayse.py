@@ -46,6 +46,12 @@ class BayseClient:
     async def __aexit__(self, *_):
         if self._owned_session and self.session: await self.session.close()
 
+    async def refresh_session(self) -> None:
+        """Recreate the aiohttp session to avoid stale connections."""
+        if self.session is not None:
+            await self.session.close()
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+
     async def request(self, method: str, path: str, body: dict[str, Any] | None = None, *, authenticated: bool = False, signed: bool = False, retries: int = 2) -> dict[str, Any]:
         if self.session is None: raise RuntimeError("BayseClient must be used as an async context manager")
         raw = canonical_json_bytes(body) if body is not None else None

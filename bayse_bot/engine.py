@@ -278,6 +278,10 @@ class Bot:
             try:
                 from api.shared import bot_diagnostics
                 bot_diagnostics["cycles"] += 1
+                # Refresh the Bayse HTTP session periodically to avoid stale connections
+                if bot_diagnostics["cycles"] % 50 == 0:
+                    await self.client.refresh_session()
+                    log.info("refreshed Bayse HTTP session at cycle %d", bot_diagnostics["cycles"])
             except Exception:
                 pass
 
