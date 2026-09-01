@@ -61,49 +61,68 @@ BOT_STATUS_COLUMNS = [
 ]
 
 
+async def _run_statement(engine, stmt: str, description: str, max_retries: int = 5) -> None:
+    """Run one migration statement in its own transaction with lock timeout + retry.
+
+    Small lock footprint per statement avoids deadlocking against the still-running
+    previous deploy (Render zero-downtime deploys keep the old instance querying).
+    """
+    is_postgres = engine.dialect.name == "postgresql"
+    for attempt in range(max_retries):
+        try:
+            async with engine.begin() as conn:
+                if is_postgres:
+                    await conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+                await conn.execute(text(stmt))
+            return
+        except Exception as e:
+            if not is_postgres:
+                log.warning("could not run migration %s: %s", description, e)
+                return
+            msg = str(e).lower()
+            retryable = "deadlock" in msg or "lock timeout" in msg or "canceling statement due to lock" in msg
+            if retryable and attempt < max_retries - 1:
+                delay = 2 ** attempt
+                log.warning("migration %s attempt %d hit lock contention, retrying in %ds: %s",
+                            description, attempt + 1, delay, e)
+                await asyncio.sleep(delay)
+            elif "already exists" in msg:
+                return
+            else:
+                log.warning("could not run migration %s: %s", description, e)
+                return
+
+
 async def ensure_columns(engine):
     """Add missing columns to existing tables (safe — only adds if not exists)."""
-    async with engine.begin() as conn:
-        for col_name, col_def in PREDICTION_COLUMNS:
-            try:
-                await conn.execute(text(
-                    f"ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
-                ))
-            except Exception as e:
-                if "sqlite" not in str(type(conn)):
-                    log.warning("could not add column %s: %s", col_name, e)
+    statements: list[tuple[str, str]] = []
+    for col_name, col_def in PREDICTION_COLUMNS:
+        statements.append((
+            f"ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {col_name} {col_def}",
+            f"predictions.{col_name}",
+        ))
+    for col_name, col_def in BOT_STATUS_COLUMNS:
+        statements.append((
+            f"ALTER TABLE bot_status ADD COLUMN IF NOT EXISTS {col_name} {col_def}",
+            f"bot_status.{col_name}",
+        ))
+    statements.append((
+        "UPDATE predictions SET observed_at = recorded_at, decided_at = recorded_at "
+        "WHERE observed_at IS NULL",
+        "backfill_timestamps",
+    ))
+    statements.append(("DROP INDEX IF EXISTS ix_predictions_market_id", "drop_unique_index"))
+    statements.append((
+        "CREATE INDEX IF NOT EXISTS ix_predictions_market_id ON predictions (market_id)",
+        "index_market_id",
+    ))
+    statements.append((
+        "CREATE INDEX IF NOT EXISTS ix_predictions_market_time ON predictions (market_id, recorded_at)",
+        "index_market_time",
+    ))
 
-        for col_name, col_def in BOT_STATUS_COLUMNS:
-            try:
-                await conn.execute(text(
-                    f"ALTER TABLE bot_status ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
-                ))
-            except Exception as e:
-                if "sqlite" not in str(type(conn)):
-                    log.warning("could not add column %s: %s", col_name, e)
-
-        # Backfill timestamps for existing rows
-        try:
-            await conn.execute(text(
-                "UPDATE predictions SET observed_at = recorded_at, decided_at = recorded_at "
-                "WHERE observed_at IS NULL"
-            ))
-        except Exception:
-            pass
-
-        # Ensure index exists (drop unique, create non-unique)
-        try:
-            await conn.execute(text(
-                "DROP INDEX IF EXISTS ix_predictions_market_id"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_predictions_market_id ON predictions (market_id)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_predictions_market_time ON predictions (market_id, recorded_at)"
-            ))
-        except Exception:
-            pass
+    for stmt, description in statements:
+        await _run_statement(engine, stmt, description)
 
 
 async def init_db():
@@ -119,8 +138,20 @@ async def init_db():
 
     engine = create_async_engine(url, echo=False, connect_args=connect_args if connect_args else None)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # create_all on existing tables only reads the catalog, but retry anyway
+    # so a zero-downtime deploy overlap can't fail startup.
+    for attempt in range(5):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            break
+        except Exception as e:
+            if attempt < 4:
+                log.warning("create_all attempt %d failed, retrying in %ds: %s",
+                            attempt + 1, 2 ** attempt, e)
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise
 
     # Add missing columns for existing databases
     await ensure_columns(engine)
