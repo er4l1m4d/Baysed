@@ -98,15 +98,19 @@ class Bot:
             events = await self.client.events()
             log.info("scan: full scan -> %d open events", len(events))
 
+        try:
+            from api.shared import bot_diagnostics
+            bot_diagnostics["discovered_events"] = len(events)
+            bot_diagnostics["discovered_markets"] = sum(len(event.get("markets", [])) for event in events)
+            bot_diagnostics["last_discovery_at"] = datetime.now(timezone.utc).isoformat()
+        except ImportError:
+            pass
+
         last_market = None
         for event in events:
-            for raw_market in event.get("markets", []):
-                market = adapt_market(event, raw_market)
-                # Store outcome IDs for WS resolution
-                if self.market_feed and market.outcome1_id and market.outcome2_id:
-                    self.market_feed.store.store_outcome_ids(
-                        market.market_id, market.outcome1_id, market.outcome2_id
-                    )
+            markets = [adapt_market(event, raw_market) for raw_market in event.get("markets", [])]
+            valid_markets: list[Market] = []
+            for market in markets:
                 reasons = validate_market(market, self.s)
                 if reasons:
                     await self.repos.event_log.log_event(
@@ -115,7 +119,42 @@ class Bot:
                         title=market.title,
                         reasons=reasons,
                     )
-                    continue
+                else:
+                    valid_markets.append(market)
+
+            if self.market_feed:
+                for market in valid_markets:
+                    if market.outcome1_id and market.outcome2_id:
+                        self.market_feed.store.store_outcome_ids(
+                            market.market_id, market.outcome1_id, market.outcome2_id
+                        )
+                if valid_markets:
+                    await self.market_feed.ensure_subscribed(
+                        event.get("id", ""),
+                        [market.market_id for market in valid_markets if market.market_id],
+                    )
+
+            for market in valid_markets:
+                try:
+                    from api import shared as api_shared
+                    api_shared.active_market = {
+                        "market_id": market.market_id,
+                        "event_id": market.event_id,
+                        "title": market.title,
+                        "strike_price": float(market.strike_price) if market.strike_price is not None else None,
+                        "opens_at": market.opens_at.isoformat() if market.opens_at else None,
+                        "closes_at": market.closes_at.isoformat() if market.closes_at else None,
+                        "yes_ask": None,
+                        "no_ask": None,
+                        "model_probability": None,
+                        "model_predicted_outcome": None,
+                        "edge": None,
+                        "edge_fee": None,
+                        "approved": False,
+                        "observed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                except ImportError:
+                    pass
                 log.info("scan: evaluating %s (strike=%s)", market.title[:40], market.strike_price)
                 await self.evaluate_market(market)
                 last_market = market
@@ -242,9 +281,8 @@ class Bot:
     async def _check_resolutions(self) -> None:
         """Check for resolved predictions and update records.
 
-        Two-phase resolution:
-        1. Bayse API resolved events (canonical, uses resolvedOutcomeId)
-        2. Aged-out predictions (closes_at in past, not in latest API batch — resolved via BTC vs strike)
+        Resolve against Bayse's canonical resolvedOutcomeId. For predictions
+        outside the recent list window, fetch their event directly by ID.
         """
         try:
             # Phase 1: Match against Bayse resolved events (canonical source)
@@ -258,23 +296,52 @@ class Bot:
                 if resolved_count > 0:
                     log.info("resolved %d predictions via resolvedOutcomeId", resolved_count)
 
-            # Phase 2: Resolve aged-out predictions not in the API batch
-            # (fell off pagination, or API returned fewer than all historical resolved markets)
-            btc = self.state.btc_features
-            if btc and btc.complete:
-                btc_price = Decimal(str(btc.price))
-                aged_count, aged_market_ids = await self.resolver.resolve_aged_out_predictions(btc_price)
-                if aged_count > 0:
-                    resolved_count += aged_count
-                    resolved_market_ids.extend(aged_market_ids)
-                    log.info("resolved %d aged-out predictions via btc_vs_strike", aged_count)
+            # Resolve old predictions via their canonical Bayse event endpoint.
+            pending = await self.repos.predictions.get_pending_predictions()
+            now = datetime.now(timezone.utc)
+            recent_event_ids = {event.get("id") for event in resolved_events}
+            aged_event_ids: list[str] = []
+            for record in pending:
+                closes_at_raw = record.get("closes_at")
+                event_id = record.get("event_id")
+                if not closes_at_raw or not event_id or event_id in recent_event_ids:
+                    continue
+                closes_at = datetime.fromisoformat(closes_at_raw.replace("Z", "+00:00"))
+                if (now - closes_at).total_seconds() >= 60 and event_id not in aged_event_ids:
+                    aged_event_ids.append(event_id)
+
+            if aged_event_ids:
+                historical = await asyncio.gather(
+                    *(self.client.event(event_id) for event_id in aged_event_ids[:10]),
+                    return_exceptions=True,
+                )
+                canonical_events = [
+                    event for event in historical
+                    if isinstance(event, dict) and event.get("status") == "resolved"
+                ]
+                aged_count, aged_market_ids = await self.resolver.resolve_from_events(canonical_events)
+                resolved_count += aged_count
+                resolved_market_ids.extend(mid for mid in aged_market_ids if mid not in resolved_market_ids)
+                if aged_count:
+                    log.info("resolved %d aged snapshots via canonical event lookup", aged_count)
 
             # Post-resolution: calibration stats and risk manager
             if resolved_count > 0:
+                try:
+                    from api.shared import bot_diagnostics
+                    bot_diagnostics["last_resolution_at"] = datetime.now(timezone.utc).isoformat()
+                except ImportError:
+                    pass
                 stats = await self.resolver.calibration_stats()
                 if stats["resolved"] > 0:
                     log.info("calibration: %d/%d resolved brier_mean=%s",
                         stats["resolved"], stats["total"], stats["brier_mean"])
+                await self.repos.bot_status.update_status({
+                    "total_predictions": stats["total"],
+                    "total_resolved": stats["resolved"],
+                    "total_correct": stats["correct"],
+                    "brier_mean": stats["brier_mean"],
+                })
 
                 # Close risk manager position if the resolved market was active
                 active_id = self.risk.state.active_market_id
@@ -392,6 +459,29 @@ class Bot:
                 snapshot.distance_from_strike_pct, snapshot.is_above_strike,
                 snapshot.seconds_remaining, snapshot.seconds_elapsed + snapshot.seconds_remaining)
 
+            # Publish discovery state before model readiness/book guards. A live
+            # market must remain visible even while features are warming up.
+            try:
+                from api import shared as api_shared
+                api_shared.active_market = {
+                    "market_id": snapshot.market_id,
+                    "event_id": snapshot.event_id,
+                    "title": snapshot.title,
+                    "strike_price": float(snapshot.strike_price),
+                    "opens_at": snapshot.opened_at.isoformat() if snapshot.opened_at else None,
+                    "closes_at": snapshot.closes_at.isoformat(),
+                    "yes_ask": float(snapshot.yes_ask) if snapshot.yes_ask is not None else None,
+                    "no_ask": float(snapshot.no_ask) if snapshot.no_ask is not None else None,
+                    "model_probability": None,
+                    "model_predicted_outcome": None,
+                    "edge": None,
+                    "edge_fee": None,
+                    "approved": False,
+                    "observed_at": snapshot.observed_at.isoformat(),
+                }
+            except ImportError:
+                pass
+
             # Check book quality (skip liquidity check in observation mode — we just want training data)
             reasons = []
             for b in (yes, no):
@@ -413,15 +503,35 @@ class Bot:
                     reasons=reasons,
                 )
                 log.info("  book issues: %s", reasons)
-                return
+                if self.s.mode is not RunMode.OBSERVATION:
+                    return
+            book_reasons = list(reasons)
 
             # Evaluate strategy — snapshot is the sole canonical input
             decision = self.strategy.evaluate(
                 StrategyInput(snapshot),
                 self.s,
             )
+            try:
+                from api import shared as api_shared
+                if api_shared.active_market:
+                    api_shared.active_market.update({
+                        "model_probability": float(decision.probability) if decision.probability is not None else None,
+                        "model_predicted_outcome": decision.outcome.value if decision.outcome else None,
+                        "edge": float(decision.edge) if decision.edge is not None else None,
+                        "edge_fee": float(decision.edge_fee) if decision.edge_fee is not None else None,
+                        "approved": decision.approved,
+                    })
+            except ImportError:
+                pass
             risk_reasons = await self.risk.approve(market.market_id)
-            reasons = list(decision.reasons) + risk_reasons
+            reasons = book_reasons + list(decision.reasons) + risk_reasons
+            try:
+                from api import shared as api_shared
+                if api_shared.active_market:
+                    api_shared.active_market["approved"] = decision.approved and not reasons
+            except ImportError:
+                pass
 
             # Record every prediction (regardless of approval)
             now = datetime.now(timezone.utc)
@@ -447,7 +557,7 @@ class Bot:
                 edge_fee=decision.edge_fee,
                 bayse_implied=snapshot.yes_ask if decision.outcome and decision.outcome.value == "YES" else snapshot.no_ask,
                 signal_strength=decision.strength,
-                approved=decision.approved,
+                approved=decision.approved and not reasons,
                 reasons=tuple(reasons),
                 # Both-side edges (for research)
                 yes_edge=decision.yes_edge,
@@ -469,16 +579,21 @@ class Bot:
                 run_id=self.run_id,
             )
             await self.pred_rec.record(pred)
+            try:
+                from api.shared import bot_diagnostics
+                bot_diagnostics["last_prediction_at"] = now.isoformat()
+            except ImportError:
+                pass
 
-                # Update bot status prediction count
-                try:
-                    from sqlalchemy import select, func
-                    from api.models import Prediction
-                    async with self.repos.predictions._session() as s:
-                        total = (await s.execute(select(func.count(Prediction.id)))).scalar() or 0
-                    await self.repos.bot_status.update_status({"total_predictions": total})
-                except Exception:
-                    pass
+            # Update bot status prediction count
+            try:
+                from sqlalchemy import select, func
+                from api.models import Prediction
+                async with self.repos.predictions._session() as s:
+                    total = (await s.execute(select(func.count(Prediction.id)))).scalar() or 0
+                await self.repos.bot_status.update_status({"total_predictions": total})
+            except Exception:
+                pass
 
             # Log decision
             await self.repos.event_log.log_event(

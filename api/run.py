@@ -68,6 +68,7 @@ async def start_bot_engine():
 
         bot_diagnostics["started"] = True
         bot_diagnostics["market_feed"] = market_feed
+        bot_diagnostics["btc_feed"] = feed
 
         # Create client (read-only endpoints work without API keys)
         client = BayseClient(s.bayse_base_url, s.public_key or "", s.secret_key or "")

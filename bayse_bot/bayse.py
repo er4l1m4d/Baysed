@@ -77,6 +77,10 @@ class BayseClient:
     async def events_by_series(self, slug: str) -> list[dict[str, Any]]:
         """Fetch open events filtered by seriesSlug (e.g. crypto-btc-15min)."""
         return self._event_list(await self.request("GET", f"/v1/pm/events?seriesSlug={slug}&status=open", authenticated=bool(self.public_key)))
+    async def event(self, event_id: str) -> dict[str, Any]:
+        """Fetch one event by ID, including canonical resolution fields."""
+        raw = await self.request("GET", f"/v1/pm/events/{event_id}", authenticated=bool(self.public_key), retries=0)
+        return raw.get("event", raw.get("data", raw))
     async def resolved_events(self, series_slug: str | None = None) -> list[dict[str, Any]]:
         """Fetch resolved events, optionally filtered by series. Used for outcome tracking."""
         path = "/v1/pm/events?status=resolved&size=50"

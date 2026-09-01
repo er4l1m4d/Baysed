@@ -161,11 +161,13 @@ class PredictionRecorder:
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
         resolution_source: str = "",
+        prediction_id: int | None = None,
     ) -> None:
         """Update prediction with resolution data."""
         await self.repository.update_resolution(
             market_id, outcome_resolution, actual_price,
             prediction_correct, brier_score, resolved_outcome_id, resolution_source,
+            prediction_id,
         )
 
     async def get_calibration_stats(self) -> dict[str, Any]:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio, json, logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 import websockets
 from .models import OrderBook, BookLevel, Outcome
 
@@ -193,20 +193,26 @@ class BayseMarketFeed:
         self.disconnect_count: int = 0
         self.reconnect_count: int = 0
         self.server_error_count: int = 0
+        self._ws = None
+        self.last_market_event_at: datetime | None = None
 
     def health(self) -> dict[str, Any]:
         """Return WS health metrics for diagnostics."""
-        from typing import Any
         last_age_ms = None
         if self.last_message_at:
             last_age_ms = (datetime.now(timezone.utc) - self.last_message_at).total_seconds() * 1000
+        market_event_age_ms = None
+        if self.last_market_event_at:
+            market_event_age_ms = (datetime.now(timezone.utc) - self.last_market_event_at).total_seconds() * 1000
         return {
+            "connected": self._ws is not None,
             "connect_count": self.connect_count,
             "disconnect_count": self.disconnect_count,
             "reconnect_count": self.reconnect_count,
             "server_error_count": self.server_error_count,
             "mapping_errors": self.mapping_errors,
             "last_message_age_ms": round(last_age_ms, 0) if last_age_ms else None,
+            "last_market_event_age_ms": round(market_event_age_ms, 0) if market_event_age_ms else None,
             "subscribed_events": len(self.subscribed_events),
             "subscribed_markets": len(self.subscribed_markets),
         }
@@ -232,6 +238,7 @@ class BayseMarketFeed:
                 async with websockets.connect(
                     BAYSE_MARKET_WS, ping_interval=None,
                 ) as ws:
+                    self._ws = ws
                     # Wait for Bayse 'connected' message (up to 10s)
                     try:
                         raw = await asyncio.wait_for(ws.recv(), timeout=10)
@@ -269,14 +276,16 @@ class BayseMarketFeed:
                             msg_type = msg.get("type")
                             data = msg.get("data", {})
 
-                            if msg_type == "price_update" and on_price:
+                            if msg_type == "price_update":
+                                self.last_market_event_at = self.last_message_at
                                 event_id = data.get("id", "")
-                                # Update canonical store
                                 for mid, pdata in data.get("markets", {}).items():
                                     self.store.update_price(event_id, mid, pdata)
-                                await on_price(event_id, data)
+                                if on_price:
+                                    await on_price(event_id, data)
 
-                            elif msg_type == "orderbook_update" and on_book:
+                            elif msg_type == "orderbook_update":
+                                self.last_market_event_at = self.last_message_at
                                 ob_data = data.get("orderbook", data)
                                 market_id = ob_data.get("marketId", "")
                                 outcome_id = ob_data.get("outcomeId", "")
@@ -288,15 +297,16 @@ class BayseMarketFeed:
                                     self.mapping_errors += 1
                                     continue
                                 book = parse_ws_book(data, market_id, outcome)
-                                # Update canonical store
                                 self.store.update_book(market_id, book)
-                                await on_book(market_id, book)
+                                if on_book:
+                                    await on_book(market_id, book)
 
-                            elif msg_type in ("buy_order", "sell_order") and on_trade:
+                            elif msg_type in ("buy_order", "sell_order"):
+                                self.last_market_event_at = self.last_message_at
                                 event_id = data.get("event", {}).get("id", "")
-                                # Update canonical store
                                 self.store.add_trade(event_id, msg)
-                                await on_trade(event_id, msg)
+                                if on_trade:
+                                    await on_trade(event_id, msg)
 
                             elif msg_type == "error":
                                 self.server_error_count += 1
@@ -304,10 +314,43 @@ class BayseMarketFeed:
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:
                 self.disconnect_count += 1
+                self._ws = None
                 log.warning("BayseMarketFeed connection issue: %s %s (retrying in %ds)",
                     type(exc).__name__, exc.args or "(no detail)", min(backoff, 30))
                 await asyncio.sleep(min(backoff, 30))
                 backoff = min(backoff * 2, 30)
+            finally:
+                self._ws = None
+
+    async def ensure_subscribed(self, event_id: str, market_ids: list[str]) -> None:
+        """Rotate subscriptions to the currently open event and its markets."""
+        target_events = {event_id} if event_id else set()
+        target_markets = set(market_ids)
+        old_events = self.subscribed_events - target_events
+        old_markets = self.subscribed_markets - target_markets
+        new_events = target_events - self.subscribed_events
+        new_markets = list(target_markets - self.subscribed_markets)
+
+        ws = self._ws
+        if ws is not None:
+            for old_event in old_events:
+                await ws.send(json.dumps({"type": "unsubscribe", "room": f"prices:{old_event}"}))
+            for old_market in old_markets:
+                await ws.send(json.dumps({"type": "unsubscribe", "room": f"orderbook:{old_market}"}))
+            for new_event in new_events:
+                await ws.send(json.dumps({"type": "subscribe", "channel": "prices", "eventId": new_event}))
+            for offset in range(0, len(new_markets), 10):
+                batch = new_markets[offset:offset + 10]
+                if batch:
+                    await ws.send(json.dumps({
+                        "type": "subscribe",
+                        "channel": "orderbook",
+                        "marketIds": batch,
+                        "currency": "USD",
+                    }))
+
+        self.subscribed_events = target_events
+        self.subscribed_markets = target_markets
 
     async def subscribe_prices(self, ws, event_id: str) -> None:
         """Subscribe to price updates for an event."""

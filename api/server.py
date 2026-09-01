@@ -93,6 +93,8 @@ class PredictionResponse(BaseModel):
     yes_edge_fee: float | None = None
     no_edge: float | None = None
     no_edge_fee: float | None = None
+    model_version: str | None = None
+    run_id: str | None = None
     # Timestamps
     observed_at: str | None = None
     decided_at: str | None = None
@@ -109,6 +111,7 @@ class PredictionResponse(BaseModel):
     actual_price: float | None
     resolved_at: str | None
     resolved_outcome_id: str | None = None
+    resolution_source: str | None = None
     prediction_correct: bool | None
     brier_score: float | None
 
@@ -185,14 +188,18 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        dead: list[WebSocket] = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception:
-                pass
+                dead.append(connection)
+        for connection in dead:
+            self.disconnect(connection)
 
 
 manager = ConnectionManager()
@@ -259,6 +266,63 @@ async def debug():
         "resolved_error": resolved_error,
         "has_api_keys": bool(os.getenv("BAYSE_PUBLIC_KEY")),
         "ws_health": bot_diagnostics.get("market_feed", {}).health() if hasattr(bot_diagnostics.get("market_feed", {}), "health") else None,
+    }
+
+
+@app.get("/pipeline-health")
+async def pipeline_health(db: AsyncSession = Depends(get_db)):
+    """Stage-by-stage health for the live research pipeline."""
+    from .shared import active_market, bot_diagnostics
+
+    total = (await db.execute(select(func.count(Prediction.id)))).scalar() or 0
+    resolved = (await db.execute(
+        select(func.count(Prediction.id)).where(Prediction.outcome_resolution != "pending")
+    )).scalar() or 0
+    modeled = (await db.execute(
+        select(func.count(Prediction.id)).where(Prediction.probability.isnot(None))
+    )).scalar() or 0
+
+    btc_feed = bot_diagnostics.get("btc_feed")
+    market_feed = bot_diagnostics.get("market_feed")
+    btc_health = btc_feed.health() if btc_feed and hasattr(btc_feed, "health") else None
+    market_health = market_feed.health() if market_feed and hasattr(market_feed, "health") else None
+
+    now = datetime.now(timezone.utc)
+    closes_at_raw = active_market.get("closes_at") if active_market else None
+    closes_at = datetime.fromisoformat(closes_at_raw.replace("Z", "+00:00")) if closes_at_raw else None
+    market_active = bool(closes_at and closes_at > now)
+
+    return {
+        "engine": {
+            "started": bot_diagnostics.get("started", False),
+            "cycles": bot_diagnostics.get("cycles", 0),
+            "error": bot_diagnostics.get("error"),
+            "init_error": bot_diagnostics.get("init_error"),
+        },
+        "btc_feed": btc_health,
+        "market_feed": market_health,
+        "discovery": {
+            "events": bot_diagnostics.get("discovered_events", 0),
+            "markets": bot_diagnostics.get("discovered_markets", 0),
+            "last_at": bot_diagnostics.get("last_discovery_at"),
+        },
+        "live_market": {
+            "active": market_active,
+            "market_id": active_market.get("market_id") if active_market else None,
+            "closes_at": closes_at_raw,
+        },
+        "predictions": {
+            "total": total,
+            "modeled": modeled,
+            "pending": total - resolved,
+            "resolved": resolved,
+            "last_at": bot_diagnostics.get("last_prediction_at"),
+        },
+        "resolution": {
+            "last_at": bot_diagnostics.get("last_resolution_at"),
+            "has_calibration_data": resolved > 0 and modeled > 0,
+        },
+        "api_websocket": {"clients": len(manager.active_connections)},
     }
 
 
@@ -335,8 +399,21 @@ async def get_live_state(db: AsyncSession = Depends(get_db)):
     """
     live_price = float(shared_state.btc_price) if shared_state.btc_price else None
 
-    # Get the most recent prediction on a market that is still open
     now = datetime.now(timezone.utc)
+    from .shared import active_market
+    if active_market:
+        closes_at_raw = active_market.get("closes_at")
+        closes_at = datetime.fromisoformat(closes_at_raw.replace("Z", "+00:00")) if closes_at_raw else None
+        seconds_remaining = max(0, int((closes_at - now).total_seconds())) if closes_at else None
+        if seconds_remaining and seconds_remaining > 0:
+            return LiveMarketResponse(
+                **{key: value for key, value in active_market.items() if key in LiveMarketResponse.model_fields},
+                btc_price=live_price,
+                seconds_remaining=seconds_remaining,
+                is_active=True,
+            )
+
+    # Startup fallback: latest still-open snapshot until the first scan completes.
     result = await db.execute(
         select(Prediction)
         .where(
@@ -399,8 +476,12 @@ async def get_status(db: AsyncSession = Depends(get_db)):
     if status.total_resolved and status.total_resolved > 0:
         accuracy = status.total_correct / status.total_resolved
 
+    heartbeat_fresh = bool(
+        status.last_cycle_at
+        and (datetime.now(timezone.utc) - status.last_cycle_at).total_seconds() < 90
+    )
     return StatusResponse(
-        is_running=status.is_running,
+        is_running=heartbeat_fresh,
         mode=status.mode,
         strategy=status.strategy,
         last_cycle_at=status.last_cycle_at.isoformat() if status.last_cycle_at else None,
@@ -451,12 +532,20 @@ async def get_predictions(
             no_ask=float(p.no_ask) if p.no_ask else None,
             spread=float(p.spread) if p.spread else None,
             strategy=p.strategy,
-            probability=float(p.probability) if p.probability else None,
+            probability=float(p.probability) if p.probability is not None else None,
             predicted_outcome=p.predicted_outcome or "",
-            edge=float(p.edge) if p.edge else None,
+            edge=float(p.edge) if p.edge is not None else None,
+            edge_fee=float(p.edge_fee) if p.edge_fee is not None else None,
+            bayse_implied=float(p.bayse_implied) if p.bayse_implied is not None else None,
             signal_strength=float(p.signal_strength),
             approved=p.approved,
             reasons=p.reasons,
+            yes_edge=float(p.yes_edge) if p.yes_edge is not None else None,
+            yes_edge_fee=float(p.yes_edge_fee) if p.yes_edge_fee is not None else None,
+            no_edge=float(p.no_edge) if p.no_edge is not None else None,
+            no_edge_fee=float(p.no_edge_fee) if p.no_edge_fee is not None else None,
+            model_version=p.model_version,
+            run_id=p.run_id,
             # Timestamps
             observed_at=p.observed_at.isoformat() if p.observed_at else None,
             decided_at=p.decided_at.isoformat() if p.decided_at else None,
@@ -470,11 +559,12 @@ async def get_predictions(
             outcome2_id=p.outcome2_id or None,
             # Resolution
             outcome_resolution=p.outcome_resolution or "pending",
-            actual_price=float(p.actual_price) if p.actual_price else None,
+            actual_price=float(p.actual_price) if p.actual_price is not None else None,
             resolved_at=p.resolved_at.isoformat() if p.resolved_at else None,
             resolved_outcome_id=p.resolved_outcome_id or None,
+            resolution_source=p.resolution_source or None,
             prediction_correct=p.prediction_correct,
-            brier_score=float(p.brier_score) if p.brier_score else None,
+            brier_score=float(p.brier_score) if p.brier_score is not None else None,
         )
         for p in predictions
     ]

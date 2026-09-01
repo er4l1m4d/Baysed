@@ -1,7 +1,7 @@
 /**
  * API client for the Bayse Bot backend.
  * REST goes directly to Render (CORS enabled).
- * WebSocket goes through Vercel rewrite proxy (cross-origin WS doesn't work on Render free tier).
+ * WebSocket connects directly to Render because Vercel rewrites don't proxy upgrades.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://baysed.onrender.com";
@@ -54,6 +54,8 @@ export interface Prediction {
   yes_edge_fee: number | null;
   no_edge: number | null;
   no_edge_fee: number | null;
+  model_version: string | null;
+  run_id: string | null;
   // Timestamps
   observed_at: string | null;
   decided_at: string | null;
@@ -70,6 +72,7 @@ export interface Prediction {
   actual_price: number | null;
   resolved_at: string | null;
   resolved_outcome_id: string | null;
+  resolution_source: string | null;
   prediction_correct: boolean | null;
   brier_score: number | null;
 }

@@ -7,6 +7,7 @@ Tests the full path:
 This path crosses several components and is where regressions are likely.
 """
 from __future__ import annotations
+import asyncio
 import pytest
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -20,6 +21,7 @@ from bayse_bot.strategy import (
     DistanceToStrikeModel, StrategyInput, Strategy,
     probability_from_distance_to_strike, fee_adjusted_edge, FEE_RATE,
 )
+from bayse_bot.resolution import ResolutionTracker
 from bayse_bot.config import Settings
 
 
@@ -305,6 +307,70 @@ class TestResolutionLifecycle:
         # Lost trade: payout = 0, pnl = -amount
         pnl_lost = Decimal("0") - amount
         assert pnl_lost == Decimal("-10")
+
+    def test_resolver_updates_every_snapshot_with_own_brier(self):
+        class PredictionRepo:
+            def __init__(self):
+                self.updates = []
+
+            async def get_pending_predictions_for_markets(self, market_ids):
+                return [
+                    {"id": 1, "market_id": "m1", "event_id": "e1", "title": "BTC",
+                     "outcome1_id": "up", "outcome2_id": "down", "probability": 0.6,
+                     "predicted_outcome": "YES"},
+                    {"id": 2, "market_id": "m1", "event_id": "e1", "title": "BTC",
+                     "outcome1_id": "up", "outcome2_id": "down", "probability": 0.8,
+                     "predicted_outcome": "YES"},
+                ]
+
+            async def update_resolution(self, **values):
+                self.updates.append(values)
+
+        class OutcomeRepo:
+            def __init__(self):
+                self.saved = []
+
+            async def save_outcome(self, outcome):
+                self.saved.append(outcome)
+
+        predictions = PredictionRepo()
+        outcomes = OutcomeRepo()
+        tracker = ResolutionTracker(predictions, outcomes)
+        count, market_ids = asyncio.run(tracker.resolve_from_events([{
+            "id": "e1",
+            "eventCloseValue": 101,
+            "markets": [{"id": "m1", "resolvedOutcomeId": "up", "status": "resolved"}],
+        }]))
+
+        assert count == 2
+        assert market_ids == ["m1"]
+        assert [update["prediction_id"] for update in predictions.updates] == [1, 2]
+        assert predictions.updates[0]["prediction_correct"] is True
+        assert predictions.updates[0]["brier_score"] == Decimal("0.16")
+        assert predictions.updates[1]["brier_score"] == Decimal("0.04")
+
+    def test_resolver_skips_unknown_outcome_id(self):
+        class PredictionRepo:
+            async def get_pending_predictions_for_markets(self, market_ids):
+                return [{"id": 1, "market_id": "m1", "outcome1_id": "up",
+                         "outcome2_id": "down", "probability": 0.6,
+                         "predicted_outcome": "YES"}]
+
+            async def update_resolution(self, **values):
+                raise AssertionError("unknown outcomes must not update predictions")
+
+        class OutcomeRepo:
+            async def save_outcome(self, outcome):
+                raise AssertionError("unknown outcomes must not be persisted")
+
+        tracker = ResolutionTracker(PredictionRepo(), OutcomeRepo())
+        count, market_ids = asyncio.run(tracker.resolve_from_events([{
+            "id": "e1",
+            "markets": [{"id": "m1", "resolvedOutcomeId": "other"}],
+        }]))
+
+        assert count == 0
+        assert market_ids == []
 
 
 # ---------------------------------------------------------------------------

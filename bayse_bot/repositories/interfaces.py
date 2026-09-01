@@ -49,8 +49,9 @@ class PredictionRepository(ABC):
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
         resolution_source: str = "",
+        prediction_id: int | None = None,
     ) -> None:
-        """Update prediction with resolution data."""
+        """Update one prediction snapshot with resolution data."""
         ...
 
     @abstractmethod

@@ -50,8 +50,8 @@ class MarketOutcome:
     """Immutable outcome of a resolved market.
 
     This is the canonical resolution record — once set, it never changes.
-    Predictions join to this via (market_id, resolved_at) to compute
-    calibration and Brier scores.
+    Predictions join to this via market_id to compute calibration and
+    Brier scores.
     """
     market_id: str
     event_id: str

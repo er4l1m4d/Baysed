@@ -107,16 +107,17 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
         brier_score: Decimal | None = None,
         resolved_outcome_id: str | None = None,
         resolution_source: str = "",
+        prediction_id: int | None = None,
     ) -> None:
-        """Update the LATEST prediction snapshot for a market with resolution data."""
+        """Update one snapshot, or the latest snapshot when no ID is supplied."""
         from api.models import Prediction
         async with self._session() as s:
-            result = await s.execute(
-                select(Prediction)
-                .where(Prediction.market_id == market_id)
-                .order_by(Prediction.recorded_at.desc())
-                .limit(1)
-            )
+            query = select(Prediction)
+            if prediction_id is not None:
+                query = query.where(Prediction.id == prediction_id)
+            else:
+                query = query.where(Prediction.market_id == market_id).order_by(Prediction.recorded_at.desc()).limit(1)
+            result = await s.execute(query)
             latest = result.scalar_one_or_none()
             if not latest:
                 return
@@ -218,6 +219,7 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
 
     def _to_dict(self, pred) -> dict[str, Any]:
         return {
+            "id": pred.id,
             "market_id": pred.market_id,
             "event_id": pred.event_id,
             "title": pred.title,
@@ -247,6 +249,8 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
             "no_edge_fee": float(pred.no_edge_fee) if pred.no_edge_fee else None,
             "strategy_version": pred.strategy_version,
             "experiment_tag": pred.experiment_tag,
+            "model_version": pred.model_version,
+            "run_id": pred.run_id,
             # Timestamps
             "observed_at": pred.observed_at.isoformat() if pred.observed_at else None,
             "decided_at": pred.decided_at.isoformat() if pred.decided_at else None,
@@ -263,6 +267,7 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
             "actual_price": float(pred.actual_price) if pred.actual_price else None,
             "resolved_at": pred.resolved_at.isoformat() if pred.resolved_at else None,
             "resolved_outcome_id": pred.resolved_outcome_id,
+            "resolution_source": pred.resolution_source,
             "prediction_correct": pred.prediction_correct,
             "brier_score": float(pred.brier_score) if pred.brier_score else None,
         }
@@ -569,12 +574,7 @@ class PostgresMarketOutcomeRepository(_SessionMixin, MarketOutcomeRepository):
                          event_close_value, btc_close_price, resolved_at)
                     VALUES (:market_id, :event_id, :resolved_outcome_id, :outcome_resolution,
                             :event_close_value, :btc_close_price, :resolved_at)
-                    ON CONFLICT (market_id) DO UPDATE SET
-                        resolved_outcome_id = :resolved_outcome_id,
-                        outcome_resolution = :outcome_resolution,
-                        event_close_value = :event_close_value,
-                        btc_close_price = :btc_close_price,
-                        resolved_at = :resolved_at
+                    ON CONFLICT (market_id) DO NOTHING
                 """),
                 {
                     "market_id": outcome["market_id"],

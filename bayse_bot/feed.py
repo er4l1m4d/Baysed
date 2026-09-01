@@ -74,6 +74,9 @@ class BayseFeed:
         # Grace period tracking
         self._connected_at: datetime | None = None
         self._received_first_tick: bool = False
+        self.connect_count: int = 0
+        self.disconnect_count: int = 0
+        self.last_error: str | None = None
 
         # Current candle accumulator
         self._candle_start: datetime | None = None
@@ -117,6 +120,20 @@ class BayseFeed:
     def stale(self, now: datetime | None = None) -> bool:
         now = now or datetime.now(timezone.utc)
         return not self.last_tick_at or (now - self.last_tick_at).total_seconds() > self.stale_after_seconds
+
+    def health(self) -> dict:
+        age_ms = None
+        if self.last_tick_at:
+            age_ms = (datetime.now(timezone.utc) - self.last_tick_at).total_seconds() * 1000
+        return {
+            "connected": self._connected_at is not None and not self.stale(),
+            "complete": self.state.btc_features.complete,
+            "connect_count": self.connect_count,
+            "disconnect_count": self.disconnect_count,
+            "last_tick_age_ms": round(age_ms, 0) if age_ms is not None else None,
+            "last_error": self.last_error,
+            "candle_count": len(self.candles),
+        }
 
     def _compute_features(self, now: datetime, volume_lookback: int = 20) -> BTCFeatures:
         """Compute BTCFeatures from local candle history + current tick."""
@@ -162,7 +179,7 @@ class BayseFeed:
         while not stop.is_set():
             try:
                 async with websockets.connect(
-                    BAYSE_WS, ping_interval=20, ping_timeout=20,
+                    BAYSE_WS, ping_interval=None,
                 ) as ws:
                     await ws.send(json.dumps({
                         "type": "subscribe",
@@ -172,10 +189,12 @@ class BayseFeed:
                     backoff = 1
                     self._connected_at = datetime.now(timezone.utc)
                     self._received_first_tick = False
+                    self.connect_count += 1
+                    self.last_error = None
                     log.info("BayseFeed connected, subscribed to BTCUSDT (Binance source)")
 
                     while not stop.is_set():
-                        raw = await asyncio.wait_for(ws.recv(), timeout=35)
+                        raw = await asyncio.wait_for(ws.recv(), timeout=70)
                         for line in raw.split("\n"):
                             if not line.strip():
                                 continue
@@ -200,6 +219,9 @@ class BayseFeed:
                                 raise RuntimeError("Bayse websocket data stale")
 
             except (OSError, asyncio.TimeoutError, websockets.WebSocketException, RuntimeError) as exc:
+                self.disconnect_count += 1
+                self._connected_at = None
+                self.last_error = f"{type(exc).__name__}: {exc}"
                 log.warning("BayseFeed connection issue: %s (retrying in %ds)", exc, min(backoff, 30))
                 await asyncio.sleep(min(backoff, 30))
                 backoff = min(backoff * 2, 30)
