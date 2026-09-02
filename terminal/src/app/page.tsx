@@ -203,7 +203,7 @@ function LiveMarketCard() {
   ];
 
   return (
-    <Card className="flex flex-col">
+    <Card className="reference-light-panel flex flex-col">
       <CardHeader
         title="Live Market"
         icon="show_chart"

@@ -98,7 +98,8 @@ export function PerformanceCard() {
           </span>
         )}
         <p className="label-caps-sm mt-2 text-on-surface-variant/70">
-          Rolling {ROLLING_WINDOW}-snapshot mean · lower is better
+          Rolling {ROLLING_WINDOW}-snapshot mean · columns are bucket means ·
+          lower is better
         </p>
       </div>
 
@@ -148,7 +149,28 @@ function Chart({
   const linePath = points
     .map(([px, py], i) => `${i === 0 ? "M" : "L"}${px.toFixed(2)},${py.toFixed(2)}`)
     .join(" ");
-  const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
+
+  // Bucket-mean columns: the reference's columnar silhouette with honest
+  // aggregation — one column = mean rolling Brier over that time bucket.
+  const N = Math.min(24, Math.max(8, Math.round(series.length / 5)));
+  const slot = W / N;
+  const buckets = Array.from({ length: N }, (_, i) => {
+    const lo = tsMin + ((tsMax - tsMin) * i) / N;
+    const hi = tsMin + ((tsMax - tsMin) * (i + 1)) / N;
+    const inBucket = series.filter(
+      (d) => d.ts >= lo && (i === N - 1 ? d.ts <= hi : d.ts < hi)
+    );
+    if (inBucket.length === 0) return null;
+    const mean = inBucket.reduce((s, d) => s + d.value, 0) / inBucket.length;
+    return {
+      x: x(lo) + slot * 0.22,
+      width: slot * 0.56,
+      y: y(mean),
+      height: Math.max(0, H - PAD_Y - y(mean)),
+      aboveBaseline: mean > BASELINE,
+      last: i === N - 1,
+    };
+  });
 
   // Grid: horizontal lines with value labels
   const gridValues = [0, 0.25, 0.5, 0.75, 1]
@@ -160,7 +182,7 @@ function Chart({
 
   return (
     <div>
-      <div className="dot-matrix relative mx-3 h-[200px] rounded-md">
+      <div className="relative mx-3 h-[200px] rounded-md">
         <svg
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
@@ -168,13 +190,6 @@ function Chart({
           aria-label="Rolling Brier score over time"
           role="img"
         >
-          <defs>
-            <linearGradient id="brierFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#00ffa3" stopOpacity="0.18" />
-              <stop offset="100%" stopColor="#00ffa3" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
           {/* Grid */}
           {gridValues.map((v) => (
             <line
@@ -203,8 +218,25 @@ function Chart({
             />
           )}
 
-          {/* Area + neon line */}
-          <path d={areaPath} fill="url(#brierFill)" />
+          {/* Bucket-mean columns. Below the dashed baseline = better than
+              random (mint); above it = worse (rose tint). Muted so the exact
+              line stays the hero. */}
+          {buckets.map(
+            (b, i) =>
+              b && (
+                <rect
+                  key={`col-${i}`}
+                  x={b.x}
+                  y={b.y}
+                  width={b.width}
+                  height={b.height}
+                  fill={b.aboveBaseline ? "#ffb4ab" : "#00ffa3"}
+                  opacity={b.last ? 0.3 : 0.15}
+                />
+              )
+          )}
+
+          {/* Precise rolling-Brier trend — the actual values, on top */}
           <path
             d={linePath}
             fill="none"
@@ -216,28 +248,15 @@ function Chart({
             style={{ filter: "drop-shadow(0 0 6px rgba(0, 255, 163, 0.5))" }}
           />
 
-          {/* Data points — last one glows */}
-          {points.map(([px, py], i) =>
-            i === points.length - 1 ? (
-              <circle
-                key={i}
-                cx={px}
-                cy={py}
-                r="1.4"
-                fill="#00ffa3"
-                style={{ filter: "drop-shadow(0 0 4px #00ffa3)" }}
-              />
-            ) : (
-              <circle
-                key={i}
-                cx={px}
-                cy={py}
-                r="1"
-                fill="#131313"
-                stroke="#00ffa3"
-                strokeWidth="0.6"
-              />
-            )
+          {/* Last point marker */}
+          {points.length > 0 && (
+            <circle
+              cx={points[points.length - 1][0]}
+              cy={points[points.length - 1][1]}
+              r="1.4"
+              fill="#00ffa3"
+              style={{ filter: "drop-shadow(0 0 4px #00ffa3)" }}
+            />
           )}
         </svg>
 

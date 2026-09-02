@@ -107,13 +107,13 @@ body {
 .glass-card {
   background: linear-gradient(
     135deg,
-    rgba(32, 31, 31, 0.6) 0%,
-    rgba(28, 27, 27, 0.4) 100%
+    rgba(38, 38, 38, 0.72) 0%,
+    rgba(24, 24, 24, 0.58) 100%
   );
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--color-border-subtle);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .tactical-panel {
@@ -122,6 +122,77 @@ body {
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--color-border-subtle);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* The reference uses one high-contrast intelligence surface to break up
+   the dark dashboard. Keep its contents readable without changing the
+   semantic status colors used throughout the terminal. */
+.reference-light-panel {
+  background: #f5f5f5 !important;
+  border-color: #d4d4d4 !important;
+  color: #050505;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.reference-light-panel .border-border-subtle,
+.reference-light-panel .border-border-subtle\/60 {
+  border-color: #d4d4d4 !important;
+}
+
+.reference-light-panel .text-on-surface {
+  color: #050505 !important;
+}
+
+.reference-light-panel .text-on-surface-variant {
+  color: #525252 !important;
+}
+
+.reference-light-panel [class*="text-on-surface-variant"] {
+  color: #525252 !important;
+}
+
+.reference-light-panel [class*="text-on-surface"]:not([class*="text-on-surface-variant"]) {
+  color: #050505 !important;
+}
+
+.reference-light-panel [class*="border-border-subtle"] {
+  border-color: #d4d4d4 !important;
+}
+
+/* Semantic colors must pass contrast on the light surface.
+   #007146 on #f5f5f5 = 5.6:1, #b3261e = 6.0:1. */
+.reference-light-panel [class*="text-primary-container"] {
+  color: #007146 !important;
+  text-shadow: none !important;
+}
+
+.reference-light-panel [class*="text-error"] {
+  color: #b3261e !important;
+}
+
+.reference-light-panel [class*="text-warning-gold"] {
+  color: #8a6d00 !important;
+}
+
+/* Fills: progress bar, status dots, badge tints. */
+.reference-light-panel .bg-primary-container,
+.reference-light-panel [class*="bg-primary-container"] {
+  background-color: #00875a !important;
+}
+
+.reference-light-panel .bg-error,
+.reference-light-panel [class*="bg-error"] {
+  background-color: #b3261e !important;
+}
+
+.reference-light-panel .bg-warning-gold,
+.reference-light-panel [class*="bg-warning-gold"] {
+  background-color: #8a6d00 !important;
+}
+
+.reference-light-panel .bg-surface-bright {
+  background-color: #d4d4d4 !important;
 }
 
 /* ------------------------------------------------------------------ */

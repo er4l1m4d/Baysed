@@ -36,14 +36,14 @@ function NavList({
             className={`group relative flex h-10 items-center rounded-lg border-l-2 transition-colors duration-150 ${
               collapsed ? "justify-center" : "gap-3 px-4"
             } ${
-              active
-                ? "border-primary-container bg-surface-container-highest text-primary-container"
+                active
+                ? "border-transparent bg-on-surface text-background shadow-[0_4px_12px_rgba(0,0,0,0.24)]"
                 : "border-transparent text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
             }`}
           >
             <span
               className={`material-symbols-outlined text-[18px] ${
-                active ? "ms-fill neon-glow" : ""
+                active ? "ms-fill" : ""
               }`}
             >
               {icon}
@@ -180,7 +180,7 @@ export function Sidebar({
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-border-subtle bg-surface transition-[width] duration-200 ease-out md:flex ${
-        collapsed ? "w-16" : "w-60"
+        collapsed ? "w-16" : "w-52"
       }`}
     >
       <div
