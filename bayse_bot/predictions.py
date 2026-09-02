@@ -113,7 +113,7 @@ class PredictionRecord:
     actual_price: Decimal | None = None  # BTC price at resolution
     resolved_at: datetime | None = None
     resolved_outcome_id: str | None = None  # raw Bayse value for audit trail
-    resolution_source: str = ""  # "bayse_api" or "btc_vs_strike"
+    resolution_source: str = ""  # canonical source, e.g. "bayse_api"
 
     def __post_init__(self):
         now = datetime.now(timezone.utc)

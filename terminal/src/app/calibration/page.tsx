@@ -74,7 +74,7 @@ export default function CalibrationPage() {
               ? calibration.brier_model.toFixed(4)
               : "--"
           }
-          subtitle="Lower is better"
+          subtitle={`n=${calibration?.resolved ?? 0} resolved · lower is better`}
           tone={
             calibration?.brier_model != null && calibration.brier_model < 0.25
               ? "green"
@@ -90,7 +90,7 @@ export default function CalibrationPage() {
               ? calibration.brier_market.toFixed(4)
               : "--"
           }
-          subtitle="Bayse implied odds as forecast"
+          subtitle={`n=${calibration?.resolved ?? 0} · Bayse implied odds as forecast`}
           loading={loading}
         />
         <StatCard
@@ -101,7 +101,7 @@ export default function CalibrationPage() {
               ? calibration.brier_baseline.toFixed(4)
               : "--"
           }
-          subtitle="Always predict 50/50"
+          subtitle={`n=${calibration?.resolved ?? 0} · always predict 50/50`}
           loading={loading}
         />
         <StatCard

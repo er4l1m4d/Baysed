@@ -559,13 +559,15 @@ async def get_status(db: AsyncSession = Depends(get_db)):
 
 @app.get("/predictions", response_model=list[PredictionResponse])
 async def get_predictions(
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    resolution: str | None = Query(None, description="Filter by resolution status"),
+    resolution: str | None = Query(None, description="Filter by resolution status ('resolved' = any non-pending)"),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Prediction).order_by(Prediction.recorded_at.desc())
-    if resolution:
+    if resolution == "resolved":
+        query = query.where(Prediction.outcome_resolution != "pending")
+    elif resolution:
         query = query.where(Prediction.outcome_resolution == resolution)
     query = query.offset(offset).limit(limit)
 

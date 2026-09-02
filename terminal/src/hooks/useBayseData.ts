@@ -17,9 +17,6 @@ import {
   type PipelineHealth,
 } from "@/lib/api";
 
-// Re-export Bayse WS for direct BTC price feed (fallback)
-export { useBayseTicker, usePriceHistory } from "./useBayseDirect";
-
 export function useBotStatus() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);

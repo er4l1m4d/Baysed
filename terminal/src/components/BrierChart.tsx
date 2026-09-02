@@ -25,7 +25,9 @@ function fmtDate(ts: number, period: Period) {
 
 export function PerformanceCard() {
   const [period, setPeriod] = useState<Period>("Weekly");
-  const { predictions, loading } = usePredictions(200);
+  // resolved-only: the chart aggregates resolved snapshots, so fetch depth
+  // without pulling the pending backlog alongside it.
+  const { predictions, loading } = usePredictions(1000, "resolved");
 
   const resolved = useMemo(
     () =>
@@ -98,8 +100,8 @@ export function PerformanceCard() {
           </span>
         )}
         <p className="label-caps-sm mt-2 text-on-surface-variant/70">
-          Rolling {ROLLING_WINDOW}-snapshot mean · columns are bucket means ·
-          lower is better
+          Rolling {ROLLING_WINDOW}-snapshot mean · n={series.length} resolved ·
+          columns are bucket means · lower is better
         </p>
       </div>
 

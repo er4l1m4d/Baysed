@@ -116,7 +116,7 @@ export default function ResolutionPage() {
           label="Brier Mean"
           icon="functions"
           value={brierMean != null ? brierMean.toFixed(4) : "--"}
-          subtitle="Across resolved modeled snapshots"
+          subtitle={`n=${brierValues.length} resolved modeled snapshots`}
           tone={brierMean != null && brierMean < 0.25 ? "green" : "red"}
           loading={loading}
         />

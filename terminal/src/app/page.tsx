@@ -99,7 +99,7 @@ function StatsRow() {
         label="Accuracy"
         icon="target"
         value={accuracy != null ? pct(accuracy) : "--"}
-        subtitle={`${calibration?.correct ?? 0}/${calibration?.resolved ?? 0} correct`}
+        subtitle={`n=${calibration?.resolved ?? 0} · ${calibration?.correct ?? 0}/${calibration?.resolved ?? 0} correct`}
         tone={accuracy == null ? "neutral" : accuracy >= 0.5 ? "green" : "red"}
         loading={loading}
       />
@@ -107,7 +107,7 @@ function StatsRow() {
         label="Brier Mean"
         icon="functions"
         value={brier != null ? brier.toFixed(4) : "--"}
-        subtitle="Lower is better"
+        subtitle={`n=${calibration?.resolved ?? 0} resolved · lower is better`}
         tone={brier == null ? "neutral" : brier < 0.25 ? "green" : "red"}
         loading={loading}
       />
