@@ -1,0 +1,131 @@
+{
+  "total": 24709,
+  "resolved": 24685,
+  "pending": 24,
+  "correct": 18639,
+  "accuracy": 0.7550739315373709,
+  "brier_mean": 0.15027505840496855,
+  "calibration_curve": [
+    {
+      "bucket": "0-10%",
+      "count": 4904,
+      "avg_predicted": 0.0242,
+      "actual_rate": 0.0563,
+      "gap": -0.0321
+    },
+    {
+      "bucket": "10-20%",
+      "count": 1491,
+      "avg_predicted": 0.1508,
+      "actual_rate": 0.2093,
+      "gap": -0.0585
+    },
+    {
+      "bucket": "20-30%",
+      "count": 1583,
+      "avg_predicted": 0.2515,
+      "actual_rate": 0.2558,
+      "gap": -0.0043
+    },
+    {
+      "bucket": "30-40%",
+      "count": 1934,
+      "avg_predicted": 0.3518,
+      "actual_rate": 0.3459,
+      "gap": 0.0059
+    },
+    {
+      "bucket": "40-50%",
+      "count": 2425,
+      "avg_predicted": 0.452,
+      "actual_rate": 0.4767,
+      "gap": -0.0247
+    },
+    {
+      "bucket": "50-60%",
+      "count": 2656,
+      "avg_predicted": 0.5444,
+      "actual_rate": 0.5452,
+      "gap": -0.0008
+    },
+    {
+      "bucket": "60-70%",
+      "count": 1979,
+      "avg_predicted": 0.6479,
+      "actual_rate": 0.5937,
+      "gap": 0.0542
+    },
+    {
+      "bucket": "70-80%",
+      "count": 1506,
+      "avg_predicted": 0.7471,
+      "actual_rate": 0.7224,
+      "gap": 0.0246
+    },
+    {
+      "bucket": "80-90%",
+      "count": 1168,
+      "avg_predicted": 0.8498,
+      "actual_rate": 0.7979,
+      "gap": 0.0518
+    },
+    {
+      "bucket": "90-100%",
+      "count": 4667,
+      "avg_predicted": 0.9779,
+      "actual_rate": 0.9593,
+      "gap": 0.0186
+    }
+  ],
+  "total_snapshots": 24709,
+  "total_predictions": 24337,
+  "total_signals": 228,
+  "prediction_coverage": 0.9849447569711441,
+  "signal_coverage": 0.009368451329251756,
+  "brier_model": 0.15736863871499318,
+  "brier_market": 0.3759602934113435,
+  "brier_baseline": 0.25,
+  "edge_vs_market": 0.21859165469635033,
+  "calibration_by_expiry": [
+    {
+      "bucket": "0-1m",
+      "count": 3657,
+      "avg_predicted": 0.4945,
+      "avg_market": 0.9472,
+      "actual_rate": 0.4955,
+      "accuracy": 0.9549
+    },
+    {
+      "bucket": "1-3m",
+      "count": 4643,
+      "avg_predicted": 0.4892,
+      "avg_market": 0.9065,
+      "actual_rate": 0.4896,
+      "accuracy": 0.8701
+    },
+    {
+      "bucket": "3-5m",
+      "count": 1744,
+      "avg_predicted": 0.4921,
+      "avg_market": 0.8766,
+      "actual_rate": 0.4903,
+      "accuracy": 0.8337
+    },
+    {
+      "bucket": "5-10m",
+      "count": 4379,
+      "avg_predicted": 0.4842,
+      "avg_market": 0.8168,
+      "actual_rate": 0.4898,
+      "accuracy": 0.7678
+    },
+    {
+      "bucket": "10-15m",
+      "count": 9890,
+      "avg_predicted": 0.4923,
+      "avg_market": 0.7159,
+      "actual_rate": 0.4907,
+      "accuracy": 0.6361
+    }
+  ]
+}

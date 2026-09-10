@@ -1,0 +1,185 @@
+{
+  "step1_data_integrity": {
+    "total_records": 24709,
+    "time_range": {
+      "oldest": "2026-08-27T04:39:44.302187+00:00",
+      "newest": "2026-09-10T21:44:50.208801+00:00"
+    },
+    "segmentation": {
+      "pre_window_resolved": 1998,
+      "run001_resolved": 22687,
+      "pre_window_model_versions": {
+        "distance_to_strike_v2": 1937,
+        "null": 61
+      },
+      "run001_model_versions": {
+        "distance_to_strike_v2": 22687
+      }
+    },
+    "run001_restarts": {
+      "count": 6,
+      "runs": {
+        "observation_20260903_002529": 19970,
+        "observation_20260902_225714": 169,
+        "observation_20260902_154721": 798,
+        "observation_20260902_152038": 47,
+        "observation_20260902_033523": 1298,
+        "observation_20260901_190828": 405
+      }
+    },
+    "duplicate_keys": 0,
+    "probability": {
+      "null_count": 372,
+      "out_of_range": 0,
+      "exact_extremes": 0,
+      "min": 0.01,
+      "max": 0.99
+    },
+    "brier_recompute_mismatches": 0,
+    "prediction_correct_mismatches": 0,
+    "timestamp_violations": {
+      "count": 534,
+      "examples": [
+        {
+          "id": 24819,
+          "market_id": "2cbbb9ab-494d-45ce-a3e3-2e97fa27fb85",
+          "observed_at": "2026-09-10T21:30:04.860952+00:00",
+          "closes_at": "2026-09-10T21:29:59.999000+00:00",
+          "resolved_at": "2026-09-10T21:32:09.162184+00:00",
+          "seconds_remaining": 0
+        },
+        {
+          "id": 24764,
+          "market_id": "4f433215-8755-44b1-bb14-7e4a337cd517",
+          "observed_at": "2026-09-10T21:00:00.356283+00:00",
+          "closes_at": "2026-09-10T20:59:59.999000+00:00",
+          "resolved_at": "2026-09-10T21:02:16.995067+00:00",
+          "seconds_remaining": 0
+        },
+        {
+          "id": 24708,
+          "market_id": "6fa6ee70-d9f1-4ab8-938c-4aeefbf22010",
+          "observed_at": "2026-09-10T20:30:11.854270+00:00",
+          "closes_at": "2026-09-10T20:29:59.999000+00:00",
+          "resolved_at": "2026-09-10T20:32:16.343112+00:00",
+          "seconds_remaining": 0
+        }
+      ]
+    }
+  },
+  "step2_coverage": {
+    "markets_observed": 818,
+    "expected_markets_8d": 768,
+    "snapshots": {
+      "total": 22687,
+      "per_market": {
+        "0": 1,
+        "1": 33,
+        "mean": 27.734718826405867,
+        "0.5": 28
+      },
+      "min_market": 1,
+      "max_market": 33
+    },
+    "per_day": {
+      "2026-09-10": {
+        "snapshots": 2420,
+        "markets": 88
+      },
+      "2026-09-09": {
+        "snapshots": 2610,
+        "markets": 94
+      },
+      "2026-09-08": {
+        "snapshots": 2686,
+        "markets": 97
+      },
+      "2026-09-07": {
+        "snapshots": 2614,
+        "markets": 94
+      },
+      "2026-09-06": {
+        "snapshots": 2586,
+        "markets": 95
+      },
+      "2026-09-05": {
+        "snapshots": 2642,
+        "markets": 96
+      },
+      "2026-09-04": {
+        "snapshots": 1948,
+        "markets": 72
+      },
+      "2026-09-03": {
+        "snapshots": 2510,
+        "markets": 91
+      },
+      "2026-09-02": {
+        "snapshots": 2671,
+        "markets": 96
+      }
+    },
+    "snapshots_per_day": {
+      "2026-09-10": 2420,
+      "2026-09-09": 2610,
+      "2026-09-08": 2686,
+      "2026-09-07": 2614,
+      "2026-09-06": 2586,
+      "2026-09-05": 2642,
+      "2026-09-04": 1948,
+      "2026-09-03": 2510,
+      "2026-09-02": 2671
+    },
+    "modeled_fraction": 0.9909199100806629,
+    "approved_fraction": 0.009388636664168908,
+    "inter_snapshot_interval_seconds": {
+      "0": 3.199,
+      "1": 78.292,
+      "0.5": 17.089,
+      "0.9": 61.998,
+      "0.99": 62.767
+    }
+  },
+  "step3_resolution_integrity": {
+    "outcome_resolution_values": {
+      "no_won": 12563,
+      "yes_won": 12122
+    },
+    "resolution_source_values": {
+      "bayse_api": 24685
+    },
+    "resolved_outcome_id": {
+      "null": 0,
+      "not_in_market_outcomes": 0
+    },
+    "actual_price_missing": 0,
+    "resolved_at_missing": 0,
+    "resolution_lag_seconds": {
+      "0": 120.822,
+      "1": 422752.66,
+      "0.5": 133.311,
+      "0.9": 141.464,
+      "0.99": 145.538
+    },
+    "pending": {
+      "count": 24,
+      "ages_seconds": {
+        "0": 188.795,
+        "1": 991.724,
+        "0.5": 707.813
+      },
+      "oldest": "2026-09-10T21:45:38.686Z",
+      "older_than_1h": 0
+    },
+    "unmodeled_resolved": {
+      "count": 372,
+      "reason_samples": [
+        "btc_data_incomplete_or_stale",
+        "outside_wat_trading_window",
+        "spread_too_wide",
+        "empty_book",
+        "relative_spread_too_wide"
+      ]
+    }
+  }
+}

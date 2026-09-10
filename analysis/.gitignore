@@ -1,0 +1,3 @@
+# Bulk raw data — re-fetchable from the live API via analysis/fetch.js
+data/resolved.json
+data/pending.json

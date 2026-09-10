@@ -1,0 +1,550 @@
+{
+  "step4_forecast_quality": {
+    "n": 22481,
+    "accuracy": 0.7658,
+    "brier_mean": 0.1508,
+    "brier_skill_vs_5050": 0.3968,
+    "log_loss": 0.4555,
+    "calibration_0p1": [
+      {
+        "bucket": "0-10%",
+        "n": 4518,
+        "avg_predicted": 0.024,
+        "actual_yes_rate": 0.0553,
+        "gap": -0.0314,
+        "brier": 0.0516
+      },
+      {
+        "bucket": "10-20%",
+        "n": 1374,
+        "avg_predicted": 0.1506,
+        "actual_yes_rate": 0.2147,
+        "gap": -0.0641,
+        "brier": 0.1719
+      },
+      {
+        "bucket": "20-30%",
+        "n": 1456,
+        "avg_predicted": 0.2516,
+        "actual_yes_rate": 0.2637,
+        "gap": -0.0122,
+        "brier": 0.1927
+      },
+      {
+        "bucket": "30-40%",
+        "n": 1766,
+        "avg_predicted": 0.3517,
+        "actual_yes_rate": 0.3437,
+        "gap": 0.008,
+        "brier": 0.2249
+      },
+      {
+        "bucket": "40-50%",
+        "n": 2238,
+        "avg_predicted": 0.4524,
+        "actual_yes_rate": 0.4772,
+        "gap": -0.0249,
+        "brier": 0.2487
+      },
+      {
+        "bucket": "50-60%",
+        "n": 2458,
+        "avg_predicted": 0.544,
+        "actual_yes_rate": 0.5452,
+        "gap": -0.0011,
+        "brier": 0.2478
+      },
+      {
+        "bucket": "60-70%",
+        "n": 1819,
+        "avg_predicted": 0.6482,
+        "actual_yes_rate": 0.5943,
+        "gap": 0.0539,
+        "brier": 0.2434
+      },
+      {
+        "bucket": "70-80%",
+        "n": 1387,
+        "avg_predicted": 0.747,
+        "actual_yes_rate": 0.7152,
+        "gap": 0.0317,
+        "brier": 0.2046
+      },
+      {
+        "bucket": "80-90%",
+        "n": 1086,
+        "avg_predicted": 0.8498,
+        "actual_yes_rate": 0.7937,
+        "gap": 0.056,
+        "brier": 0.1644
+      },
+      {
+        "bucket": "90-100%",
+        "n": 4379,
+        "avg_predicted": 0.978,
+        "actual_yes_rate": 0.9578,
+        "gap": 0.0202,
+        "brier": 0.0394
+      }
+    ],
+    "by_confidence": [
+      {
+        "bucket": "0-10% (coin flip)",
+        "n": 2533,
+        "accuracy": 0.5176,
+        "brier": 0.2497,
+        "avg_prob_yes": 0.5007,
+        "actual_yes_rate": 0.514,
+        "avg_confidence": 0.0425
+      },
+      {
+        "bucket": "10-30%",
+        "n": 4061,
+        "accuracy": 0.5765,
+        "brier": 0.2434,
+        "avg_prob_yes": 0.5011,
+        "actual_yes_rate": 0.4932,
+        "avg_confidence": 0.1963
+      },
+      {
+        "bucket": "30-50%",
+        "n": 3203,
+        "accuracy": 0.6744,
+        "brier": 0.2193,
+        "avg_prob_yes": 0.4996,
+        "actual_yes_rate": 0.4811,
+        "avg_confidence": 0.3959
+      },
+      {
+        "bucket": "50-70%",
+        "n": 2575,
+        "accuracy": 0.7526,
+        "brier": 0.1888,
+        "avg_prob_yes": 0.4756,
+        "actual_yes_rate": 0.4641,
+        "avg_confidence": 0.5977
+      },
+      {
+        "bucket": "70-90%",
+        "n": 2578,
+        "accuracy": 0.8413,
+        "brier": 0.1369,
+        "avg_prob_yes": 0.4577,
+        "actual_yes_rate": 0.4779,
+        "avg_confidence": 0.8044
+      },
+      {
+        "bucket": "90%+ (confident)",
+        "n": 7531,
+        "accuracy": 0.9688,
+        "brier": 0.0302,
+        "avg_prob_yes": 0.4998,
+        "actual_yes_rate": 0.5046,
+        "avg_confidence": 0.9724
+      }
+    ],
+    "brier_decomposition": {
+      "reliability": 0.0011,
+      "resolution": 0.099,
+      "uncertainty": 0.2499,
+      "check_reliability_minus_resolution_plus_uncertainty": 0.152
+    }
+  },
+  "step5_baseline_comparison": {
+    "bayse_implied_semantics": {
+      "yes_predicted_rows_with_bayse_implied": 10297,
+      "yes_rows_where_bayse_implied_equals_yes_ask": 10297,
+      "no_predicted_rows_with_bayse_implied": 10853,
+      "no_rows_where_bayse_implied_equals_no_ask": 10853,
+      "conclusion": "bayse_implied = ask of PREDICTED side (P(yes) only when predicted YES). /calibration compares it to yes_won => NO rows scored against the wrong side."
+    },
+    "brier_market_as_stored_bug": 0.3744,
+    "corrected_market_brier": {
+      "any_ask_available_n": 22089,
+      "brier_market_corrected": 0.1995,
+      "brier_model_same_rows": 0.1522,
+      "full_two_sided_book_n": 17238,
+      "brier_market_full_book": 0.151,
+      "brier_model_full_book_rows": 0.1537,
+      "brier_5050_reference": 0.25
+    },
+    "head_to_head": {
+      "n": 22089,
+      "model_closer": 13056,
+      "market_closer": 7679,
+      "tie": 1354,
+      "model_share": 0.5911
+    },
+    "market_accuracy": 0.7214,
+    "model_accuracy_same_rows": 0.7635
+  },
+  "step6_signal_quality": {
+    "approved": {
+      "n": 213,
+      "accuracy": 0.662,
+      "brier": 0.2363,
+      "predicted_yes": 123,
+      "predicted_no": 90,
+      "avg_edge_fee": 0.0813
+    },
+    "rejected": {
+      "n": 22268,
+      "accuracy": 0.7668,
+      "brier": 0.15
+    },
+    "rejection_reasons": {
+      "model_edge_below_minimum": 19588,
+      "negative_edge_after_fees": 18019,
+      "outside_wat_trading_window": 14620,
+      "relative_spread_too_wide": 8061,
+      "spread_too_wide": 7937,
+      "signal_strength_below_minimum": 6576,
+      "too_close_to_expiry": 3337,
+      "empty_book": 2783,
+      "missing_book_prices": 1391,
+      "model_edge_above_guardrail": 308,
+      "crossed_book": 8
+    },
+    "direction": {
+      "predicted_yes_n": 10941,
+      "predicted_no_n": 11540,
+      "accuracy_when_yes": 0.7654,
+      "accuracy_when_no": 0.7661,
+      "actual_yes_rate": 0.4925
+    },
+    "signal_strength_deciles": [
+      {
+        "decile": 1,
+        "signal_range": "0-0.09",
+        "n": 2248,
+        "accuracy": 0.5618,
+        "brier": 0.2255
+      },
+      {
+        "decile": 2,
+        "signal_range": "0.09-0.21",
+        "n": 2248,
+        "accuracy": 0.5716,
+        "brier": 0.2318
+      },
+      {
+        "decile": 3,
+        "signal_range": "0.21-0.36",
+        "n": 2248,
+        "accuracy": 0.6063,
+        "brier": 0.2347
+      },
+      {
+        "decile": 4,
+        "signal_range": "0.36-0.55",
+        "n": 2248,
+        "accuracy": 0.6517,
+        "brier": 0.2266
+      },
+      {
+        "decile": 5,
+        "signal_range": "0.55-0.79",
+        "n": 2248,
+        "accuracy": 0.726,
+        "brier": 0.1983
+      },
+      {
+        "decile": 6,
+        "signal_range": "0.79-1.17",
+        "n": 2248,
+        "accuracy": 0.7665,
+        "brier": 0.1827
+      },
+      {
+        "decile": 7,
+        "signal_range": "1.17-1.79",
+        "n": 2248,
+        "accuracy": 0.863,
+        "brier": 0.1214
+      },
+      {
+        "decile": 8,
+        "signal_range": "1.79-2.89",
+        "n": 2248,
+        "accuracy": 0.9337,
+        "brier": 0.0643
+      },
+      {
+        "decile": 9,
+        "signal_range": "2.89-5.16",
+        "n": 2248,
+        "accuracy": 0.984,
+        "brier": 0.0158
+      },
+      {
+        "decile": 10,
+        "signal_range": "5.17-70.54",
+        "n": 2249,
+        "accuracy": 0.9929,
+        "brier": 0.0071
+      }
+    ]
+  },
+  "step7_edge_analysis": {
+    "approved_trade_sim": {
+      "n": 213,
+      "hit_rate": 0.662,
+      "mean_roi_per_trade": -0.0523,
+      "total_roi": -11.1367,
+      "avg_entry_price": 0.6942,
+      "winners": 141,
+      "losers": 72
+    },
+    "counterfactual_pool": {
+      "n_with_edge_fee_and_book": 21150
+    },
+    "counterfactual": [
+      {
+        "threshold": 0,
+        "n": 3131,
+        "hit_rate": 0.7157,
+        "mean_roi_per_trade": -0.0279,
+        "total_roi_flat_1u": -87.4089
+      },
+      {
+        "threshold": 0.01,
+        "n": 2563,
+        "hit_rate": 0.7074,
+        "mean_roi_per_trade": -0.034,
+        "total_roi_flat_1u": -87.2199
+      },
+      {
+        "threshold": 0.02,
+        "n": 2191,
+        "hit_rate": 0.7079,
+        "mean_roi_per_trade": -0.0304,
+        "total_roi_flat_1u": -66.6366
+      },
+      {
+        "threshold": 0.03,
+        "n": 1858,
+        "hit_rate": 0.7067,
+        "mean_roi_per_trade": -0.0311,
+        "total_roi_flat_1u": -57.7464
+      },
+      {
+        "threshold": 0.05,
+        "n": 1361,
+        "hit_rate": 0.7002,
+        "mean_roi_per_trade": -0.0318,
+        "total_roi_flat_1u": -43.2533
+      },
+      {
+        "threshold": 0.08,
+        "n": 800,
+        "hit_rate": 0.6875,
+        "mean_roi_per_trade": -0.0414,
+        "total_roi_flat_1u": -33.1007
+      },
+      {
+        "threshold": 0.1,
+        "n": 584,
+        "hit_rate": 0.6918,
+        "mean_roi_per_trade": -0.027,
+        "total_roi_flat_1u": -15.7557
+      },
+      {
+        "threshold": 0.15,
+        "n": 275,
+        "hit_rate": 0.7055,
+        "mean_roi_per_trade": 0.005,
+        "total_roi_flat_1u": 1.3718
+      }
+    ]
+  },
+  "step8_conditional_performance": {
+    "by_time_to_expiry": [
+      {
+        "bucket": "0-1m",
+        "n": 3392,
+        "accuracy": 0.954,
+        "brier": 0.035,
+        "avg_prob_yes": 0.4956,
+        "actual_yes_rate": 0.4968,
+        "avg_confidence": 0.8977
+      },
+      {
+        "bucket": "1-3m",
+        "n": 4284,
+        "accuracy": 0.8711,
+        "brier": 0.0949,
+        "avg_prob_yes": 0.4933,
+        "actual_yes_rate": 0.4923,
+        "avg_confidence": 0.8277
+      },
+      {
+        "bucket": "3-5m",
+        "n": 1615,
+        "accuracy": 0.8328,
+        "brier": 0.1218,
+        "avg_prob_yes": 0.4943,
+        "actual_yes_rate": 0.4916,
+        "avg_confidence": 0.745
+      },
+      {
+        "bucket": "5-10m",
+        "n": 4040,
+        "accuracy": 0.7653,
+        "brier": 0.1599,
+        "avg_prob_yes": 0.4854,
+        "actual_yes_rate": 0.4911,
+        "avg_confidence": 0.5975
+      },
+      {
+        "bucket": "10-15m",
+        "n": 9150,
+        "accuracy": 0.635,
+        "brier": 0.221,
+        "avg_prob_yes": 0.4939,
+        "actual_yes_rate": 0.4919,
+        "avg_confidence": 0.3171
+      }
+    ],
+    "by_realized_volatility": [
+      {
+        "bucket": "0.001 to 0.0157",
+        "n": 4493,
+        "accuracy": 0.7447,
+        "brier": 0.165,
+        "avg_prob_yes": 0.4994,
+        "actual_yes_rate": 0.4903,
+        "avg_confidence": 0.6054
+      },
+      {
+        "bucket": "0.0157 to 0.0233",
+        "n": 4498,
+        "accuracy": 0.7448,
+        "brier": 0.1584,
+        "avg_prob_yes": 0.4964,
+        "actual_yes_rate": 0.4606,
+        "avg_confidence": 0.5829
+      },
+      {
+        "bucket": "0.0233 to 0.0299",
+        "n": 4497,
+        "accuracy": 0.759,
+        "brier": 0.1565,
+        "avg_prob_yes": 0.484,
+        "actual_yes_rate": 0.4859,
+        "avg_confidence": 0.5697
+      },
+      {
+        "bucket": "0.0299 to 0.0393",
+        "n": 4496,
+        "accuracy": 0.7898,
+        "brier": 0.1387,
+        "avg_prob_yes": 0.4784,
+        "actual_yes_rate": 0.496,
+        "avg_confidence": 0.5788
+      },
+      {
+        "bucket": "0.0393 to 0.2282",
+        "n": 4497,
+        "accuracy": 0.7905,
+        "brier": 0.1355,
+        "avg_prob_yes": 0.5044,
+        "actual_yes_rate": 0.5299,
+        "avg_confidence": 0.5788
+      }
+    ],
+    "by_momentum_pct": [
+      {
+        "bucket": "-1.3604 to -0.0329",
+        "n": 4496,
+        "accuracy": 0.7825,
+        "brier": 0.1452,
+        "avg_prob_yes": 0.3103,
+        "actual_yes_rate": 0.3436,
+        "avg_confidence": 0.6225
+      },
+      {
+        "bucket": "-0.0329 to -0.0078",
+        "n": 4496,
+        "accuracy": 0.76,
+        "brier": 0.1511,
+        "avg_prob_yes": 0.4048,
+        "actual_yes_rate": 0.4139,
+        "avg_confidence": 0.5657
+      },
+      {
+        "bucket": "-0.0078 to 0.0075",
+        "n": 4496,
+        "accuracy": 0.7493,
+        "brier": 0.1526,
+        "avg_prob_yes": 0.4981,
+        "actual_yes_rate": 0.4893,
+        "avg_confidence": 0.5503
+      },
+      {
+        "bucket": "0.0075 to 0.0323",
+        "n": 4496,
+        "accuracy": 0.7375,
+        "brier": 0.1673,
+        "avg_prob_yes": 0.5849,
+        "actual_yes_rate": 0.5663,
+        "avg_confidence": 0.5561
+      },
+      {
+        "bucket": "0.0323 to 0.6347",
+        "n": 4497,
+        "accuracy": 0.7994,
+        "brier": 0.1379,
+        "avg_prob_yes": 0.6645,
+        "actual_yes_rate": 0.6495,
+        "avg_confidence": 0.6209
+      }
+    ],
+    "by_abs_distance_from_strike": [
+      {
+        "bucket": "0 to 0.016",
+        "n": 4496,
+        "accuracy": 0.5443,
+        "brier": 0.2472,
+        "avg_prob_yes": 0.5005,
+        "actual_yes_rate": 0.4913,
+        "avg_confidence": 0.1519
+      },
+      {
+        "bucket": "0.016 to 0.0375",
+        "n": 4496,
+        "accuracy": 0.6746,
+        "brier": 0.2125,
+        "avg_prob_yes": 0.4823,
+        "actual_yes_rate": 0.466,
+        "avg_confidence": 0.4246
+      },
+      {
+        "bucket": "0.0375 to 0.0674",
+        "n": 4495,
+        "accuracy": 0.7793,
+        "brier": 0.1587,
+        "avg_prob_yes": 0.4946,
+        "actual_yes_rate": 0.4945,
+        "avg_confidence": 0.6398
+      },
+      {
+        "bucket": "0.0674 to 0.1245",
+        "n": 4497,
+        "accuracy": 0.8784,
+        "brier": 0.0957,
+        "avg_prob_yes": 0.4894,
+        "actual_yes_rate": 0.5083,
+        "avg_confidence": 0.7848
+      },
+      {
+        "bucket": "0.1245 to 2.3236",
+        "n": 4497,
+        "accuracy": 0.9522,
+        "brier": 0.04,
+        "avg_prob_yes": 0.4959,
+        "actual_yes_rate": 0.5026,
+        "avg_confidence": 0.9143
+      }
+    ]
+  }
+}

@@ -1,6 +1,7 @@
 # Observation Run 001 — Frozen-Run Manifest
 
-**Status: ACTIVE — do not modify the model during the run window.**
+**Status: COMPLETE (2026-09-10) — analysis in `analysis/RUN_001_REPORT.md`.**
+**Verdict: model validated (Brier 0.1508, +39.7% skill); approval gate anti-selective; taker path unprofitable — NOT ready to trade.**
 
 ## Run identity
 

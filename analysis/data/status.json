@@ -1,0 +1,17 @@
+{
+  "is_running": true,
+  "mode": "observation",
+  "strategy": "distance_to_strike",
+  "last_cycle_at": "2026-09-10T21:58:59.725551+00:00",
+  "last_btc_price": 77134.01,
+  "last_momentum_pct": 0.005186048854395326,
+  "last_volatility": 0.013070212410023051,
+  "total_predictions": 24709,
+  "total_resolved": 24685,
+  "total_correct": 18639,
+  "accuracy": 0.7550739315373709,
+  "brier_mean": 0.150275,
+  "uptime_seconds": 0,
+  "error_count": 0,
+  "last_error": null
+}

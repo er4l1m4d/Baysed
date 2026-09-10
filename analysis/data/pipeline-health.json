@@ -1,0 +1,55 @@
+{
+  "engine": {
+    "started": true,
+    "cycles": 20544,
+    "error": null,
+    "init_error": null
+  },
+  "btc_feed": {
+    "connected": true,
+    "complete": true,
+    "connect_count": 2,
+    "disconnect_count": 8,
+    "last_tick_age_ms": 552,
+    "last_error": null,
+    "candle_count": 240
+  },
+  "market_feed": {
+    "connected": true,
+    "connect_count": 2019,
+    "disconnect_count": 2025,
+    "reconnect_count": 2018,
+    "server_error_count": 0,
+    "mapping_errors": 0,
+    "last_message_age_ms": 2043,
+    "last_market_event_age_ms": 2043,
+    "subscribed_events": 1,
+    "subscribed_markets": 1
+  },
+  "discovery": {
+    "events": 1,
+    "markets": 1,
+    "error": null,
+    "slug": "crypto-btc-15min",
+    "last_at": "2026-09-10T21:59:01.515756+00:00"
+  },
+  "live_market": {
+    "active": true,
+    "market_id": "18446359-18bc-4379-ac15-2ec64a61ed98",
+    "closes_at": "2026-09-10T21:59:59.999000+00:00"
+  },
+  "predictions": {
+    "total": 24709,
+    "modeled": 24337,
+    "pending": 24,
+    "resolved": 24685,
+    "last_at": "2026-09-10T21:59:01.615770+00:00"
+  },
+  "resolution": {
+    "last_at": "2026-09-10T21:47:10.815507+00:00",
+    "has_calibration_data": true
+  },
+  "api_websocket": {
+    "clients": 0
+  }
+}
