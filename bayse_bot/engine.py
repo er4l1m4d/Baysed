@@ -14,7 +14,7 @@ from .config import Settings
 from .feed import MarketState
 from .market import adapt_market, validate_market
 from .models import BTCFeatures, BookLevel, Market, OrderBook, Outcome, RunMode, EventType
-from .predictions import PredictionRecord, PredictionRecorder
+from .predictions import PredictionRecord, PredictionRecorder, market_implied_p_yes
 from .repositories import RepositorySet
 from .resolution import ResolutionTracker
 from .risk import RiskManager
@@ -580,7 +580,7 @@ class Bot:
                 predicted_outcome=decision.outcome.value if decision.outcome else "",
                 edge=decision.edge,
                 edge_fee=decision.edge_fee,
-                bayse_implied=snapshot.yes_ask if decision.outcome and decision.outcome.value == "YES" else snapshot.no_ask,
+                bayse_implied=market_implied_p_yes(snapshot.yes_ask, snapshot.no_ask),
                 signal_strength=decision.strength,
                 approved=decision.approved and not reasons,
                 reasons=tuple(reasons),

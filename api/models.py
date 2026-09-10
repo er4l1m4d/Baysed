@@ -48,7 +48,7 @@ class Prediction(Base):
     predicted_outcome = Column(String(10))
     edge = Column(Numeric(10, 6))
     edge_fee = Column(Numeric(10, 6))  # Fee-adjusted edge (selected side)
-    bayse_implied = Column(Numeric(10, 6))  # Bayse market implied probability
+    bayse_implied = Column(Numeric(10, 6))  # Market-implied P(yes): yes_ask, else 1 - no_ask
     signal_strength = Column(Numeric(10, 6))
     approved = Column(Boolean, default=False)
     reasons = Column(JSON)

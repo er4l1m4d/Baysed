@@ -26,10 +26,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .database import init_db, get_db, async_session
 from .models import Prediction, BotStatus, TradeRecord
 from .shared import shared_state
+from .middleware import RateLimitMiddleware, require_admin
 
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Bayse Bot API", version="1.0.0")
+
+# Added BEFORE CORS so CORSMiddleware wraps it (outermost) — 429 responses
+# then carry CORS headers the terminal can read.
+app.add_middleware(RateLimitMiddleware, limit=300, window_seconds=60)
 
 # CORS for Vercel terminal
 app.add_middleware(
@@ -219,7 +224,7 @@ async def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
-@app.get("/debug")
+@app.get("/debug", dependencies=[Depends(require_admin)])
 async def debug():
     from .shared import bot_diagnostics
     bayse_ok = False
@@ -328,7 +333,7 @@ async def pipeline_health(db: AsyncSession = Depends(get_db)):
     }
 
 
-@app.get("/debug/discovery")
+@app.get("/debug/discovery", dependencies=[Depends(require_admin)])
 async def debug_discovery():
     """Diagnose why the engine sees 0 events."""
     import os
@@ -384,7 +389,7 @@ async def debug_discovery():
     return result
 
 
-@app.get("/debug/resolution")
+@app.get("/debug/resolution", dependencies=[Depends(require_admin)])
 async def debug_resolution():
     """Debug endpoint to see what the resolver sees."""
     import os
@@ -690,20 +695,22 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
         signal_coverage = total_signals / total_predictions if total_predictions > 0 else None
 
         # Baseline comparison: Brier scores for model, market, and 50% baseline
+        # Market P(yes) is derived from raw asks (yes_ask, else 1 - no_ask) —
+        # NOT the bayse_implied column, whose semantics changed post-Run 001.
         baseline_result = await db.execute(text("""
             SELECT
                 AVG(POWER(probability - actual_binary, 2)) AS brier_model,
-                AVG(POWER(bayse_implied - actual_binary, 2)) AS brier_market,
+                AVG(POWER(market_p_yes - actual_binary, 2)) AS brier_market,
                 AVG(POWER(0.5 - actual_binary, 2)) AS brier_baseline
             FROM (
                 SELECT
                     probability,
-                    bayse_implied,
+                    COALESCE(yes_ask, 1 - no_ask) AS market_p_yes,
                     CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END AS actual_binary
                 FROM predictions
                 WHERE outcome_resolution != 'pending'
                   AND probability IS NOT NULL
-                  AND bayse_implied IS NOT NULL
+                  AND COALESCE(yes_ask, 1 - no_ask) IS NOT NULL
             ) sub
         """))
         row = baseline_result.fetchone()
@@ -724,7 +731,7 @@ async def get_calibration(db: AsyncSession = Depends(get_db)):
                 END AS time_bucket,
                 COUNT(*) AS cnt,
                 AVG(probability) AS avg_prob,
-                AVG(bayse_implied) AS avg_market,
+                AVG(COALESCE(yes_ask, 1 - no_ask)) AS avg_market,
                 AVG(CASE WHEN outcome_resolution = 'yes_won' THEN 1.0 ELSE 0.0 END) AS actual_rate,
                 AVG(CASE WHEN prediction_correct = true THEN 1.0 ELSE 0.0 END) AS accuracy
             FROM predictions

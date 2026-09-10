@@ -226,17 +226,25 @@ class BayseMarketFeed:
     ) -> None:
         """Main WS loop. Reconnects on failure with exponential backoff.
 
-        Bayse server pings every ~54s. We disable client-side pings
-        (ping_interval=None) and set recv timeout to 70s (>54s) so we
-        don't timeout before the server's ping arrives.
+        Keepalive design (validated by A/B test against live Bayse WS,
+        2026-09-10):
+
+        - Client pings every 54s (the server's own cadence; the server
+          tolerates them — 6 min of zero app traffic stayed connected).
+          ping_timeout=20 means a dead connection is detected within ~74s
+          by the library, raising ConnectionClosed.
+        - recv() uses a 30s POLL timeout that is NOT a failure: quiet
+          books (>30s without app messages) are normal. The old design
+          treated 70s of silence as a dead connection and reconnected,
+          causing ~256 spurious reconnects/day during Run 001.
+        - The server's ~54s pings are auto-ponged by the library at the
+          protocol layer; they never surface in recv().
         """
         backoff = 1
         while not stop.is_set():
             try:
-                # ping_interval=None: let server handle keepalive (every ~54s)
-                # recv timeout 70s > server's 54s ping interval
                 async with websockets.connect(
-                    BAYSE_MARKET_WS, ping_interval=None,
+                    BAYSE_MARKET_WS, ping_interval=54, ping_timeout=20,
                 ) as ws:
                     self._ws = ws
                     # Wait for Bayse 'connected' message (up to 10s)
@@ -265,8 +273,12 @@ class BayseMarketFeed:
                         await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": [market_id], "currency": "USD"}))
 
                     while not stop.is_set():
-                        # 70s timeout > server's 54s ping interval
-                        raw = await asyncio.wait_for(ws.recv(), timeout=70)
+                        # Poll recv: quiet periods are normal, NOT dead connections.
+                        # Dead connections surface as ConnectionClosed via ping timeout.
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                        except asyncio.TimeoutError:
+                            continue
                         self.last_message_at = datetime.now(timezone.utc)
 
                         for line in raw.split("\n"):

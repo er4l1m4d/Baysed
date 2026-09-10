@@ -1,0 +1,94 @@
+name: Nightly Data Backup
+
+# Protects the Run 002 prediction data (the crown jewel) against
+# Neon/Render loss: a full nightly dump of /predictions (+ trades and a
+# pipeline-health snapshot) uploaded as a workflow artifact.
+#
+# Storage notes:
+# - Artifacts kept 30 days (JSON gzips ~10x; a full dump is a few MB).
+# - A failed backup run emails the repo owner — free alerting for
+#   "API is broken" as a side effect.
+
+on:
+  schedule:
+    - cron: '17 2 * * *' # nightly 02:17 UTC (offset from busy hours)
+  workflow_dispatch: {} # manual trigger
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Dump data from live API
+        env:
+          API: https://baysed.onrender.com
+        run: |
+          set -euo pipefail
+          echo "BACKUP_NAME=baysed-backup-$(date -u +%F)" >> "$GITHUB_ENV"
+
+          node <<'EOF'
+          const fs = require("fs");
+          const API = process.env.API;
+
+          async function getJSON(url, retries = 4) {
+            for (let i = 0; i <= retries; i++) {
+              try {
+                const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
+                if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+                return await res.json();
+              } catch (err) {
+                if (i === retries) throw err;
+                console.log(`  retry ${i + 1}/${retries}: ${err.message}`);
+                await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
+              }
+            }
+          }
+
+          (async () => {
+            // Full predictions dump (paginated)
+            const all = [];
+            let offset = 0;
+            for (;;) {
+              const page = await getJSON(`${API}/predictions?limit=1000&offset=${offset}`);
+              if (!Array.isArray(page)) throw new Error(`non-array response at offset ${offset}`);
+              all.push(...page);
+              console.log(`fetched ${page.length} (total ${all.length})`);
+              if (page.length < 1000) break;
+              offset += 1000;
+              await new Promise((r) => setTimeout(r, 250));
+            }
+            fs.writeFileSync("predictions.json", JSON.stringify(all));
+
+            // Trades (small today; grows once trading starts)
+            const trades = [];
+            let toffset = 0;
+            for (;;) {
+              const page = await getJSON(`${API}/trades?limit=500&offset=${toffset}`);
+              trades.push(...page);
+              if (page.length < 500) break;
+              toffset += 500;
+            }
+            fs.writeFileSync("trades.json", JSON.stringify(trades));
+
+            // Pipeline health snapshot
+            const health = await getJSON(`${API}/pipeline-health`);
+            fs.writeFileSync("pipeline-health.json", JSON.stringify(health, null, 2));
+
+            console.log(`DONE predictions=${all.length} trades=${trades.length}`);
+          })().catch((e) => { console.error(e); process.exit(1); });
+          EOF
+
+      - name: Compress
+        run: |
+          gzip -9 predictions.json trades.json
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BACKUP_NAME }}
+          retention-days: 30
+          path: |
+            predictions.json.gz
+            trades.json.gz
+            pipeline-health.json

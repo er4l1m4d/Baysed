@@ -42,6 +42,22 @@ def outcome_from_bayse_resolved(
     return PredictionOutcome.EXPIRED.value
 
 
+def market_implied_p_yes(yes_ask: Decimal | None, no_ask: Decimal | None) -> Decimal | None:
+    """Canonical market-implied P(yes) from raw asks.
+
+    Prefers the YES ask; falls back to 1 - NO ask. Returns None when
+    neither side is quoted. This is outcome-independent — always P(yes),
+    never the ask of whichever side the model predicted (the old semantics
+    made market-Brier comparisons score NO predictions against the wrong
+    side).
+    """
+    if yes_ask is not None:
+        return yes_ask
+    if no_ask is not None:
+        return Decimal("1") - no_ask
+    return None
+
+
 @dataclass
 class PredictionRecord:
     """One prediction snapshot for one market evaluation.
@@ -77,7 +93,7 @@ class PredictionRecord:
     predicted_outcome: str = ""  # "YES" or "NO"
     edge: Decimal | None = None
     edge_fee: Decimal | None = None  # Fee-adjusted edge (selected side)
-    bayse_implied: Decimal | None = None  # Bayse market implied probability of predicted outcome
+    bayse_implied: Decimal | None = None  # Market-implied P(yes): yes_ask, else 1 - no_ask
     signal_strength: Decimal = Decimal("0")
     approved: bool = False
     reasons: tuple[str, ...] = ()

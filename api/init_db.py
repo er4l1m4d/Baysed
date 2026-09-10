@@ -27,7 +27,10 @@ def get_database_url() -> tuple[str, bool]:
     params = parse_qs(parsed.query)
     needs_ssl = params.get("sslmode", [None])[0] == "require"
 
-    clean_url = urlunparse(parsed._replace(query=""))
+    # Only round-trip through urlunparse when there IS a query: for URLs
+    # with an empty netloc (SQLite), urlunparse mangles 'scheme:///path'
+    # into 'scheme:/path', which SQLAlchemy cannot parse.
+    clean_url = urlunparse(parsed._replace(query="")) if parsed.query else raw_url
 
     if clean_url.startswith("postgresql://") and "+asyncpg" not in clean_url:
         clean_url = clean_url.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -110,6 +113,16 @@ async def ensure_columns(engine):
         "UPDATE predictions SET observed_at = recorded_at, decided_at = recorded_at "
         "WHERE observed_at IS NULL",
         "backfill_timestamps",
+    ))
+    statements.append((
+        # Backfill bayse_implied to canonical market P(yes) semantics
+        # (yes_ask, else 1 - no_ask). Pre-Run-002 rows stored the ask of the
+        # PREDICTED side, which made market-Brier comparisons score NO
+        # predictions against the wrong side. Idempotent: after the first
+        # successful run no rows match.
+        "UPDATE predictions SET bayse_implied = COALESCE(yes_ask, 1 - no_ask) "
+        "WHERE bayse_implied IS NULL OR bayse_implied <> COALESCE(yes_ask, 1 - no_ask)",
+        "backfill_bayse_implied_canonical_pyes",
     ))
     statements.append(("DROP INDEX IF EXISTS ix_predictions_market_id", "drop_unique_index"))
     statements.append((

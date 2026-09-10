@@ -1,0 +1,89 @@
+name: Pipeline Health Check
+
+# Outage alerting for the live engine on Render.
+#
+# Catches the failure class from the 2026-09-04 outage: discovery went dark
+# for 7.6 hours and nothing noticed because health checks were manual.
+#
+# Hard failures (failed run -> GitHub emails the repo owner):
+#   - /pipeline-health unreachable
+#   - engine not started / fatal error / init error
+#   - predictions.last_at stale > 30 min (catches discovery outages,
+#     dead engine loops, and upstream Bayse unavailability)
+#
+# Warnings (workflow annotation only, no email):
+#   - mapping_errors / server_error_count > 0 (cumulative counters —
+#     non-zero means "investigate at next analysis", not "outage now")
+#   - discovery error, feeds disconnected (reconnect churn is normal)
+
+on:
+  schedule:
+    - cron: '*/30 * * * *' # every 30 minutes, UTC
+  workflow_dispatch: {} # manual trigger
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check /pipeline-health
+        env:
+          HEALTH_URL: https://baysed.onrender.com/pipeline-health
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          RESPONSE=$(curl -sS --max-time 60 "$HEALTH_URL") || {
+            echo "::error::/pipeline-health unreachable — API down or Render instance dead"
+            exit 1
+          }
+          echo "$RESPONSE" | jq .
+
+          # --- Hard failures ---
+          STARTED=$(echo "$RESPONSE" | jq -r '.engine.started')
+          ENGINE_ERROR=$(echo "$RESPONSE" | jq -r '.engine.error // empty')
+          INIT_ERROR=$(echo "$RESPONSE" | jq -r '.engine.init_error // empty')
+          LAST_AT=$(echo "$RESPONSE" | jq -r '.predictions.last_at // empty')
+
+          if [ "$STARTED" != "true" ]; then
+            echo "::error::engine.started = $STARTED — engine not running"
+            FAILED=1
+          fi
+          if [ -n "$ENGINE_ERROR" ]; then
+            echo "::error::engine fatal error: $ENGINE_ERROR"
+            FAILED=1
+          fi
+          if [ -n "$INIT_ERROR" ]; then
+            echo "::error::engine init error: $INIT_ERROR"
+            FAILED=1
+          fi
+          if [ -z "$LAST_AT" ]; then
+            echo "::error::predictions.last_at is null — no prediction recorded since restart"
+            FAILED=1
+          else
+            AGE=$(( $(date +%s) - $(date -d "$LAST_AT" +%s) ))
+            echo "last prediction ${AGE}s ago"
+            if [ "$AGE" -gt 1800 ]; then
+              echo "::error::predictions.last_at is ${AGE}s old (>1800s) — OUTAGE (like 2026-09-04)"
+              FAILED=1
+            fi
+          fi
+
+          # --- Warnings ---
+          MAPPING_ERRORS=$(echo "$RESPONSE" | jq -r '.market_feed.mapping_errors // 0')
+          SERVER_ERRORS=$(echo "$RESPONSE" | jq -r '.market_feed.server_error_count // 0')
+          DISCOVERY_ERROR=$(echo "$RESPONSE" | jq -r '.discovery.error // empty')
+          BTC_CONNECTED=$(echo "$RESPONSE" | jq -r '.btc_feed.connected // false')
+          MARKET_CONNECTED=$(echo "$RESPONSE" | jq -r '.market_feed.connected // false')
+
+          [ "$MAPPING_ERRORS" != "0" ] && echo "::warning::mapping_errors = $MAPPING_ERRORS (investigate at next analysis)"
+          [ "$SERVER_ERRORS" != "0" ] && echo "::warning::server_error_count = $SERVER_ERRORS (investigate at next analysis)"
+          [ -n "$DISCOVERY_ERROR" ] && echo "::warning::discovery error: $DISCOVERY_ERROR"
+          [ "$BTC_CONNECTED" != "true" ] && echo "::warning::btc_feed disconnected"
+          [ "$MARKET_CONNECTED" != "true" ] && echo "::warning::market_feed disconnected"
+
+          if [ "$FAILED" = "1" ]; then
+            echo "::error::Pipeline health check FAILED — see errors above"
+            exit 1
+          fi
+          echo "Pipeline healthy."

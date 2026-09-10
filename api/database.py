@@ -23,8 +23,12 @@ parsed = urlparse(DATABASE_URL)
 params = parse_qs(parsed.query)
 needs_ssl = params.get("sslmode", [None])[0] == "require"
 
-# Remove ALL query params — asyncpg doesn't understand Neon's extras
-DATABASE_URL = urlunparse(parsed._replace(query=""))
+# Remove ALL query params — asyncpg doesn't understand Neon's extras.
+# Only round-trip through urlunparse when there IS a query: for URLs with
+# an empty netloc (SQLite), urlunparse mangles 'scheme:///path' into
+# 'scheme:/path', which SQLAlchemy cannot parse.
+if parsed.query:
+    DATABASE_URL = urlunparse(parsed._replace(query=""))
 
 # Configure SSL for asyncpg if needed
 connect_args = {}
@@ -35,10 +39,10 @@ if needs_ssl:
     connect_args["ssl"] = ctx
 
 engine = create_async_engine(
-    DATABASE_URL, 
-    echo=False, 
+    DATABASE_URL,
+    echo=False,
     pool_pre_ping=True,
-    connect_args=connect_args if connect_args else None
+    connect_args=connect_args,  # {} is SQLAlchemy's effective default; None crashes it
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
