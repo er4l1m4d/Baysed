@@ -186,6 +186,7 @@ class BayseMarketFeed:
         self.store = store or MarketStateStore()
         self.subscribed_events: set[str] = set()
         self.subscribed_markets: set[str] = set()
+        self.subscribed_activity_events: set[str] = set()
         self.last_message_at: datetime | None = None
         self.mapping_errors: int = 0
         # Health metrics for observation run
@@ -269,6 +270,8 @@ class BayseMarketFeed:
                     # Re-subscribe after reconnect
                     for event_id in self.subscribed_events:
                         await ws.send(json.dumps({"type": "subscribe", "channel": "prices", "eventId": event_id}))
+                    for event_id in self.subscribed_activity_events:
+                        await ws.send(json.dumps({"type": "subscribe", "channel": "activity", "eventId": event_id}))
                     for market_id in self.subscribed_markets:
                         await ws.send(json.dumps({"type": "subscribe", "channel": "orderbook", "marketIds": [market_id], "currency": "USD"}))
 
@@ -335,7 +338,12 @@ class BayseMarketFeed:
                 self._ws = None
 
     async def ensure_subscribed(self, event_id: str, market_ids: list[str]) -> None:
-        """Rotate subscriptions to the currently open event and its markets."""
+        """Rotate subscriptions to the currently open event and its markets.
+
+        Subscribes to three channels: prices + activity (event-scoped) and
+        orderbook (market-scoped). Activity trade prints feed the Run 002
+        execution research (taker flow, fill context).
+        """
         target_events = {event_id} if event_id else set()
         target_markets = set(market_ids)
         new_events = target_events - self.subscribed_events
@@ -345,6 +353,7 @@ class BayseMarketFeed:
         if ws is not None:
             for new_event in new_events:
                 await ws.send(json.dumps({"type": "subscribe", "channel": "prices", "eventId": new_event}))
+                await ws.send(json.dumps({"type": "subscribe", "channel": "activity", "eventId": new_event}))
             for offset in range(0, len(new_markets), 10):
                 batch = new_markets[offset:offset + 10]
                 if batch:
@@ -357,6 +366,7 @@ class BayseMarketFeed:
 
         self.subscribed_events = target_events
         self.subscribed_markets = target_markets
+        self.subscribed_activity_events = target_events
 
     async def subscribe_prices(self, ws, event_id: str) -> None:
         """Subscribe to price updates for an event."""

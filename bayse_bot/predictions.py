@@ -58,6 +58,39 @@ def market_implied_p_yes(yes_ask: Decimal | None, no_ask: Decimal | None) -> Dec
     return None
 
 
+def serialize_book(book, max_levels: int = 10) -> dict | None:
+    """Serialize an OrderBook's top-N levels to a JSON-safe dict.
+
+    Levels are [price, quantity] string pairs, best first
+    (bids descending, asks ascending — the OrderBook's stored order).
+    """
+    if book is None:
+        return None
+    def levels(side) -> list[list[str]]:
+        return [[str(l.price), str(l.quantity)] for l in side[:max_levels]]
+    return {"bids": levels(book.bids), "asks": levels(book.asks)}
+
+
+def book_state_from_snapshot(snapshot, max_levels: int = 10) -> dict | None:
+    """Full top-of-book state for a snapshot, source-marked.
+
+    Shape:
+        {
+          "source": "ws" | "rest" | "synthetic_last_trade" | "",
+          "yes": {"bids": [[p, q]...], "asks": [[p, q]...]} | null,
+          "no":  {...} | null
+        }
+
+    Returns None when neither book exists. Levels are strings to avoid
+    float rounding; convert at analysis time.
+    """
+    yes = serialize_book(snapshot.yes_book, max_levels)
+    no = serialize_book(snapshot.no_book, max_levels)
+    if yes is None and no is None:
+        return None
+    return {"source": snapshot.book_source, "yes": yes, "no": no}
+
+
 @dataclass
 class PredictionRecord:
     """One prediction snapshot for one market evaluation.
@@ -86,6 +119,15 @@ class PredictionRecord:
     yes_ask: Decimal | None = None
     no_ask: Decimal | None = None
     spread: Decimal | None = None
+
+    # Run 002 research: full book depth, second price source, midnight regime
+    book_state: dict | None = None          # top-N bids/asks both sides, source-marked
+    yes_book_age_ms: float | None = None    # WS book staleness (None for rest/synthetic)
+    no_book_age_ms: float | None = None
+    market_price: Decimal | None = None     # contract last-trade price
+    market_volume: Decimal | None = None    # contract volume
+    btc_daily_close: Decimal | None = None  # BTC at last 00:00 UTC rollover
+    coinbase_btc_price: Decimal | None = None  # BTC spot from Coinbase
 
     # Strategy output
     strategy: str = ""

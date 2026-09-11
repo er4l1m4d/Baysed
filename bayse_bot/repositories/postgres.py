@@ -12,17 +12,19 @@ Session strategy:
   gets a fresh session.
 """
 from __future__ import annotations
+import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, func, update, Integer, text
+from sqlalchemy import select, func, update, delete, Integer, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
     RiskRepository, MarketRepository, MarketOutcomeRepository, EventLogRepository,
+    MarketActivityRepository,
 )
 
 
@@ -236,6 +238,14 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
             "yes_ask": float(pred.yes_ask) if pred.yes_ask else None,
             "no_ask": float(pred.no_ask) if pred.no_ask else None,
             "spread": float(pred.spread) if pred.spread else None,
+            # Run 002 research context
+            "book_state": pred.book_state,
+            "yes_book_age_ms": float(pred.yes_book_age_ms) if pred.yes_book_age_ms is not None else None,
+            "no_book_age_ms": float(pred.no_book_age_ms) if pred.no_book_age_ms is not None else None,
+            "market_price": float(pred.market_price) if pred.market_price else None,
+            "market_volume": float(pred.market_volume) if pred.market_volume else None,
+            "btc_daily_close": float(pred.btc_daily_close) if pred.btc_daily_close else None,
+            "coinbase_btc_price": float(pred.coinbase_btc_price) if pred.coinbase_btc_price else None,
             "strategy": pred.strategy,
             "probability": float(pred.probability) if pred.probability else None,
             "predicted_outcome": pred.predicted_outcome or "",
@@ -669,3 +679,63 @@ class PostgresEventLogRepository(_SessionMixin, EventLogRepository):
                 }
                 for row in result.fetchall()
             ]
+
+
+class PostgresMarketActivityRepository(_SessionMixin, MarketActivityRepository):
+    """PostgreSQL implementation of raw WS activity persistence.
+
+    Uses the ORM (not raw SQL) so the JSON `raw` column serializes and
+    deserializes correctly on both PostgreSQL and SQLite.
+    """
+
+    async def insert_batch(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        from api.models import MarketActivity
+        async with self._session() as s:
+            s.add_all([
+                MarketActivity(
+                    market_id=r.get("market_id") or "",
+                    event_id=r.get("event_id") or "",
+                    msg_type=r.get("msg_type") or "",
+                    raw=r.get("raw") or {},
+                )
+                for r in rows
+            ])
+            await s.flush()
+
+    async def get_activity(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        market_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        from api.models import MarketActivity
+        async with self._session() as s:
+            query = select(MarketActivity).order_by(
+                MarketActivity.recorded_at.desc(), MarketActivity.id.desc()
+            )
+            if market_id:
+                query = query.where(MarketActivity.market_id == market_id)
+            query = query.offset(offset).limit(limit)
+            result = await s.execute(query)
+            return [
+                {
+                    "id": r.id,
+                    "market_id": r.market_id or "",
+                    "event_id": r.event_id or "",
+                    "msg_type": r.msg_type or "",
+                    "raw": r.raw,
+                    "recorded_at": r.recorded_at.isoformat() if hasattr(r.recorded_at, "isoformat") else (r.recorded_at or ""),
+                }
+                for r in result.scalars().all()
+            ]
+
+    async def prune_older_than(self, hours: int = 48) -> int:
+        from api.models import MarketActivity
+        async with self._session() as s:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            result = await s.execute(
+                delete(MarketActivity).where(MarketActivity.recorded_at < cutoff)
+            )
+            return result.rowcount or 0

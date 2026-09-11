@@ -119,6 +119,24 @@ class PredictionResponse(BaseModel):
     resolution_source: str | None = None
     prediction_correct: bool | None
     brier_score: float | None
+    # Run 002 research context
+    book_state: dict | None = None
+    yes_book_age_ms: float | None = None
+    no_book_age_ms: float | None = None
+    market_price: float | None = None
+    market_volume: float | None = None
+    btc_daily_close: float | None = None
+    coinbase_btc_price: float | None = None
+
+
+class ActivityResponse(BaseModel):
+    """Raw WS activity (trade print) row."""
+    id: int
+    market_id: str
+    event_id: str
+    msg_type: str
+    raw: dict | None = None
+    recorded_at: str
 
 
 class LiveMarketResponse(BaseModel):
@@ -567,6 +585,7 @@ async def get_predictions(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     resolution: str | None = Query(None, description="Filter by resolution status ('resolved' = any non-pending)"),
+    include_book: bool = Query(False, description="Include full book_state depth (heavier payload)"),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Prediction).order_by(Prediction.recorded_at.desc())
@@ -630,6 +649,14 @@ async def get_predictions(
             resolution_source=p.resolution_source or None,
             prediction_correct=p.prediction_correct,
             brier_score=float(p.brier_score) if p.brier_score is not None else None,
+            # Run 002 research context (book_state only on request — it's ~1KB/row)
+            book_state=p.book_state if include_book else None,
+            yes_book_age_ms=float(p.yes_book_age_ms) if p.yes_book_age_ms is not None else None,
+            no_book_age_ms=float(p.no_book_age_ms) if p.no_book_age_ms is not None else None,
+            market_price=float(p.market_price) if p.market_price is not None else None,
+            market_volume=float(p.market_volume) if p.market_volume is not None else None,
+            btc_daily_close=float(p.btc_daily_close) if p.btc_daily_close is not None else None,
+            coinbase_btc_price=float(p.coinbase_btc_price) if p.coinbase_btc_price is not None else None,
         )
         for p in predictions
     ]
@@ -810,6 +837,37 @@ async def get_trades(
             pnl=float(t.pnl) if t.pnl else None,
         )
         for t in trades
+    ]
+
+
+@app.get("/activity", response_model=list[ActivityResponse])
+async def get_activity(
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    market_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Raw WS activity (trade prints) — Run 002 execution research."""
+    from .models import MarketActivity
+
+    query = select(MarketActivity).order_by(MarketActivity.recorded_at.desc(), MarketActivity.id.desc())
+    if market_id:
+        query = query.where(MarketActivity.market_id == market_id)
+    query = query.offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    rows = result.scalars().all()
+
+    return [
+        ActivityResponse(
+            id=r.id,
+            market_id=r.market_id or "",
+            event_id=r.event_id or "",
+            msg_type=r.msg_type or "",
+            raw=r.raw,
+            recorded_at=r.recorded_at.isoformat() if r.recorded_at else "",
+        )
+        for r in rows
     ]
 
 

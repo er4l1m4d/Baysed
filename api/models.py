@@ -42,6 +42,15 @@ class Prediction(Base):
     no_ask = Column(Numeric(10, 6))
     spread = Column(Numeric(10, 6))
 
+    # Run 002 research: full book depth + context
+    book_state = Column(JSON)  # {source, yes: {bids, asks}, no: {bids, asks}} top-N levels
+    yes_book_age_ms = Column(Numeric(12, 3))   # WS book staleness (None for rest/synthetic)
+    no_book_age_ms = Column(Numeric(12, 3))
+    market_price = Column(Numeric(10, 6))      # contract last-trade price
+    market_volume = Column(Numeric(20, 8))     # contract volume
+    btc_daily_close = Column(Numeric(20, 8))   # BTC at last 00:00 UTC rollover
+    coinbase_btc_price = Column(Numeric(20, 8))  # BTC spot from Coinbase (2nd source)
+
     # Strategy output
     strategy = Column(String(100), nullable=False)
     probability = Column(Numeric(10, 6))
@@ -138,3 +147,20 @@ class TradeRecord(Base):
     recorded_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     settled = Column(Boolean, default=False)
     pnl = Column(Numeric(20, 8))
+
+
+class MarketActivity(Base):
+    """Raw WS activity message (trade print) — Run 002 execution research.
+
+    Raw-first persistence: message shapes from the activity channel are not
+    fully known, so rows store the full payload; feature extraction happens
+    at analysis time. Bounded by engine-side pruning (48h retention).
+    """
+    __tablename__ = "market_activity"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    market_id = Column(String(255), index=True, default="")
+    event_id = Column(String(255), index=True, default="")
+    msg_type = Column(String(50), default="")
+    raw = Column(JSON)
+    recorded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)

@@ -10,7 +10,7 @@ MarketState is the single shared object that all components read from.
 from __future__ import annotations
 import asyncio, json, logging
 from collections import deque
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Awaitable, Callable
 import websockets
@@ -36,6 +36,10 @@ class MarketState:
             datetime.now(timezone.utc), False,
         )
         self.last_btc_update: datetime | None = None
+        # BTC price at the last observed 00:00 UTC rollover (Binance daily
+        # candle close). None until the feed observes its first rollover
+        # after startup. Used to test the Run-001 midnight-regime hypothesis.
+        self.btc_daily_close: Decimal | None = None
 
 
 class BayseFeed:
@@ -83,6 +87,9 @@ class BayseFeed:
         self._candle_close: Decimal = Decimal("0")
         self._candle_volume: Decimal = Decimal("0")
 
+        # UTC-day tracking for daily-close capture (Binance daily candle close)
+        self._utc_day: date | None = None
+
     def ingest_tick(self, price: str | float | int, at: datetime | None = None) -> None:
         """Process a single BTC price tick from the WebSocket."""
         now = at or datetime.now(timezone.utc)
@@ -93,6 +100,16 @@ class BayseFeed:
             return
         self.last_price = p
         self.last_tick_at = now
+
+        # Daily-close capture: first tick of a new UTC day approximates the
+        # Binance daily candle close (00:00 UTC). Only record on a genuine
+        # rollover — not on the first tick after startup, which is just
+        # "now", not midnight.
+        today = now.date()
+        if self._utc_day is not None and today > self._utc_day:
+            self.state.btc_daily_close = p
+            log.info("UTC daily close captured: $%s", p)
+        self._utc_day = today
 
         # Accumulate into current candle
         if self._candle_start is None:
@@ -178,8 +195,11 @@ class BayseFeed:
         backoff = 1
         while not stop.is_set():
             try:
+                # Same keepalive design as BayseMarketFeed (see error.md /
+                # A/B test 2026-09-10): client pings at the server's 54s
+                # cadence; recv() polls at 30s and quiet is NOT a failure.
                 async with websockets.connect(
-                    BAYSE_WS, ping_interval=None,
+                    BAYSE_WS, ping_interval=54, ping_timeout=20,
                 ) as ws:
                     await ws.send(json.dumps({
                         "type": "subscribe",
@@ -194,21 +214,27 @@ class BayseFeed:
                     log.info("BayseFeed connected, subscribed to BTCUSDT (Binance source)")
 
                     while not stop.is_set():
-                        raw = await asyncio.wait_for(ws.recv(), timeout=70)
-                        for line in raw.split("\n"):
-                            if not line.strip():
-                                continue
-                            msg = json.loads(line)
-                            if msg.get("type") == "asset_price":
-                                data = msg.get("data", {})
-                                price = data.get("price")
-                                if price is not None:
-                                    self.ingest_tick(price)
-                                    self._received_first_tick = True
-                                    if on_features:
-                                        await on_features(self.state.btc_features)
-                            else:
-                                log.debug("BayseFeed ignoring message type=%s", msg.get("type"))
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                        except asyncio.TimeoutError:
+                            # Quiet period — poll the clock, don't kill the
+                            # connection. Genuine staleness is handled below.
+                            pass
+                        else:
+                            for line in raw.split("\n"):
+                                if not line.strip():
+                                    continue
+                                msg = json.loads(line)
+                                if msg.get("type") == "asset_price":
+                                    data = msg.get("data", {})
+                                    price = data.get("price")
+                                    if price is not None:
+                                        self.ingest_tick(price)
+                                        self._received_first_tick = True
+                                        if on_features:
+                                            await on_features(self.state.btc_features)
+                                else:
+                                    log.debug("BayseFeed ignoring message type=%s", msg.get("type"))
 
                         # Only check staleness after first tick or 10s grace period
                         if self._received_first_tick or (

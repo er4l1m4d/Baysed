@@ -48,3 +48,38 @@ Format:
 - **Root cause:** `connect_args=connect_args if connect_args else None` passes None explicitly when no SSL is needed; SQLAlchemy's `pop_kwarg("connect_args", {})` returns None (explicit kwarg overrides the default), then `cparams.update(None)` explodes. Production masked it: Neon URLs always set sslmode=require → non-empty dict
 - **Solution:** always pass `connect_args=connect_args` (empty dict is the effective default)
 - **Prevention:** never pass `x if x else None` for a parameter whose library default is a mutable like `{}` — passing None is NOT the same as omitting the kwarg. Check: two latent "local SQLite startup broken" bugs hid behind one working production config
+
+## 2026-09-11 — Same two URL bugs found in repositories/__init__.py (error.md reuse worked)
+- **Error:** `create_repositories()` contained the identical urlunparse-mangling and connect_args=None bugs as api/database.py
+- **Context:** Phase B — writing an integration test against SQLite
+- **Root cause:** copy-pasted URL-handling code; never executed on SQLite in production
+- **Solution:** applied the exact fixes from the 2026-09-10 entries (only round-trip when query exists; pass connect_args unconditionally)
+- **Prevention:** this is why error.md exists — grep for the bug pattern repo-wide when logging a new entry. Done now: no other urlunparse(query="") sites remain
+
+## 2026-09-11 — create_repositories DDL was never SQLite-compatible (NOW/SERIAL)
+- **Error:** `sqlite3.OperationalError: near "(": syntax error` at `CREATE TABLE risk_state ... DEFAULT NOW()`
+- **Context:** Phase B activity-repo integration test on SQLite
+- **Root cause:** the raw DDL used PostgreSQL-only syntax (`NOW()`, `SERIAL PRIMARY KEY`); SQLite has neither. Latent forever because production only runs Postgres
+- **Solution:** dialect-aware DDL — `INTEGER PRIMARY KEY` on SQLite / `SERIAL PRIMARY KEY` on PostgreSQL for auto-id columns; `CURRENT_TIMESTAMP` (portable) instead of `NOW()`
+- **Prevention:** raw SQL DDL for "portable" repositories must be tested on every supported dialect, not just the production one
+
+## 2026-09-11 — Raw SQL INSERT with CAST(:raw AS JSON) breaks JSON roundtrip
+- **Error:** `TypeError: 'int' object is not subscriptable` — `raw` column came back as a string, not a dict
+- **Context:** Phase B activity repo — `insert_batch` used raw SQL with `CAST(:raw AS JSON)`
+- **Root cause:** raw text() SQL bypasses SQLAlchemy's JSON type binding entirely — the column is written as a string and read back as a string on both PostgreSQL (asyncpg returns JSON as str) and SQLite
+- **Solution:** rewrote insert/select/delete for market_activity using the ORM (MarketActivity model with JSON column), which serializes/deserializes on both dialects
+- **Prevention:** for JSON columns, use ORM models or typed `insert()`/`select()` constructs — never string-templated SQL with JSON payloads
+
+## 2026-09-11 — Async generator fixture needs pytest_asyncio.fixture
+- **Error:** `AttributeError: 'async_generator' object has no attribute 'activity'`
+- **Context:** Phase B test fixture yielding a RepositorySet
+- **Root cause:** `@pytest.fixture` on an async-generator function does not await it (pytest-asyncio strict mode) — the test receives the generator object
+- **Solution:** `@pytest_asyncio.fixture` for async generator fixtures
+- **Prevention:** async fixtures (especially generators with yield) always need the pytest_asyncio decorator in strict mode
+
+## 2026-09-11 — Edit tool joined two lines (missing trailing newline in oldString)
+- **Error:** `SyntaxError` at test collection; two import statements fused onto one line
+- **Context:** removing a duplicate import line in tests/test_book_state.py
+- **Root cause:** the oldString ended mid-file without the trailing newline, so the replacement merged the following line's content
+- **Solution:** re-split the line
+- **Prevention:** when a line-targeted edit's oldString is a complete line, include the trailing newline in both oldString and newString

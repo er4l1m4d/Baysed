@@ -57,6 +57,14 @@ PREDICTION_COLUMNS = [
     ("model_version", "VARCHAR(100)"),
     ("run_id", "VARCHAR(100)"),
     ("resolution_source", "VARCHAR(50)"),
+    # Run 002 research columns (book depth + context)
+    ("book_state", "JSONB"),
+    ("yes_book_age_ms", "NUMERIC(12, 3)"),
+    ("no_book_age_ms", "NUMERIC(12, 3)"),
+    ("market_price", "NUMERIC(10, 6)"),
+    ("market_volume", "NUMERIC(20, 8)"),
+    ("btc_daily_close", "NUMERIC(20, 8)"),
+    ("coinbase_btc_price", "NUMERIC(20, 8)"),
 ]
 
 BOT_STATUS_COLUMNS = [

@@ -36,6 +36,7 @@ async def start_bot_engine():
         from bayse_bot.engine import Bot
         from bayse_bot.feed import BayseFeed
         from bayse_bot.bayse_market_ws import BayseMarketFeed
+        from bayse_bot.activity_buffer import ActivityBuffer
         from bayse_bot.bayse import BayseClient
         from bayse_bot.repositories import create_repositories
 
@@ -49,12 +50,13 @@ async def start_bot_engine():
         state = shared_state
         feed = BayseFeed(state, momentum_window_seconds=s.momentum_window_seconds)
         market_feed = BayseMarketFeed()
+        activity_buffer = ActivityBuffer(maxlen=5000)
         log.info("feeds created, starting BTC feed...")
 
         stop = asyncio.Event()
 
         btc_task = asyncio.create_task(feed.run(stop))
-        market_task = asyncio.create_task(market_feed.run(stop))
+        market_task = asyncio.create_task(market_feed.run(stop, on_trade=activity_buffer.add))
 
         for _ in range(50):
             if feed.last_price:
@@ -74,7 +76,7 @@ async def start_bot_engine():
         client = BayseClient(s.bayse_base_url, s.public_key or "", s.secret_key or "")
         await client.__aenter__()
 
-        bot = Bot(s, client, state, repos, market_feed)
+        bot = Bot(s, client, state, repos, market_feed, activity_buffer=activity_buffer)
 
         try:
             await bot.initialize()

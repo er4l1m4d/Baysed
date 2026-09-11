@@ -40,12 +40,12 @@ async function fetchAllPages(base) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   console.log("Fetching resolved predictions...");
-  const resolved = await fetchAllPages("/predictions?resolution=resolved");
+  const resolved = await fetchAllPages("/predictions?resolution=resolved&include_book=true");
   fs.writeFileSync(path.join(OUT_DIR, "resolved.json"), JSON.stringify(resolved));
   console.log(`resolved: ${resolved.length}`);
 
   console.log("Fetching pending predictions...");
-  const pending = await fetchAllPages("/predictions?resolution=pending");
+  const pending = await fetchAllPages("/predictions?resolution=pending&include_book=true");
   fs.writeFileSync(path.join(OUT_DIR, "pending.json"), JSON.stringify(pending));
   console.log(`pending: ${pending.length}`);
 

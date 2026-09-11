@@ -45,11 +45,11 @@ jobs:
           }
 
           (async () => {
-            // Full predictions dump (paginated)
+            // Full predictions dump (paginated, incl. book depth for Run 002)
             const all = [];
             let offset = 0;
             for (;;) {
-              const page = await getJSON(`${API}/predictions?limit=1000&offset=${offset}`);
+              const page = await getJSON(`${API}/predictions?limit=1000&offset=${offset}&include_book=true`);
               if (!Array.isArray(page)) throw new Error(`non-array response at offset ${offset}`);
               all.push(...page);
               console.log(`fetched ${page.length} (total ${all.length})`);
@@ -70,17 +70,29 @@ jobs:
             }
             fs.writeFileSync("trades.json", JSON.stringify(trades));
 
+            // Activity prints (48h retention — nightly cadence captures everything)
+            const activity = [];
+            let aoffset = 0;
+            for (;;) {
+              const page = await getJSON(`${API}/activity?limit=1000&offset=${aoffset}`);
+              activity.push(...page);
+              if (page.length < 1000) break;
+              aoffset += 1000;
+              await new Promise((r) => setTimeout(r, 250));
+            }
+            fs.writeFileSync("activity.json", JSON.stringify(activity));
+
             // Pipeline health snapshot
             const health = await getJSON(`${API}/pipeline-health`);
             fs.writeFileSync("pipeline-health.json", JSON.stringify(health, null, 2));
 
-            console.log(`DONE predictions=${all.length} trades=${trades.length}`);
+            console.log(`DONE predictions=${all.length} trades=${trades.length} activity=${activity.length}`);
           })().catch((e) => { console.error(e); process.exit(1); });
           EOF
 
       - name: Compress
         run: |
-          gzip -9 predictions.json trades.json
+          gzip -9 predictions.json trades.json activity.json
           ls -la
 
       - name: Upload artifact
@@ -91,4 +103,5 @@ jobs:
           path: |
             predictions.json.gz
             trades.json.gz
+            activity.json.gz
             pipeline-health.json

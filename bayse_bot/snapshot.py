@@ -59,6 +59,15 @@ class MarketSnapshot:
     spread: Decimal | None = None
     realized_volatility: Decimal = Decimal("0")
 
+    # --- Run 002 research context (all optional, None when unavailable) ---
+    market_last_price: Decimal | None = None   # contract last-trade price (prices channel)
+    market_volume: Decimal | None = None       # contract volume (prices channel)
+    btc_daily_close: Decimal | None = None     # BTC at last 00:00 UTC rollover
+    coinbase_price: Decimal | None = None      # BTC spot from Coinbase (2nd source)
+    yes_book_age_ms: float | None = None       # WS book staleness at snapshot time
+    no_book_age_ms: float | None = None
+    book_source: str = ""                      # "ws" | "rest" | "synthetic_last_trade"
+
     # --- Source metadata ---
     observed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -86,10 +95,19 @@ class MarketSnapshot:
         yes_book: OrderBook | None = None,
         no_book: OrderBook | None = None,
         now: datetime | None = None,
+        *,
+        market_last_price: Decimal | None = None,
+        market_volume: Decimal | None = None,
+        btc_daily_close: Decimal | None = None,
+        coinbase_price: Decimal | None = None,
+        yes_book_age_ms: float | None = None,
+        no_book_age_ms: float | None = None,
+        book_source: str = "",
     ) -> MarketSnapshot | None:
         """Build a MarketSnapshot from market metadata + live data.
 
         Returns None if the contract cannot be constructed (missing strike, closes_at, etc.).
+        Keyword-only args carry optional Run 002 research context.
         """
         now = now or datetime.now(timezone.utc)
 
@@ -132,6 +150,13 @@ class MarketSnapshot:
             is_above_strike=is_above,
             spread=spread,
             realized_volatility=btc.atr_pct,
+            market_last_price=market_last_price,
+            market_volume=market_volume,
+            btc_daily_close=btc_daily_close,
+            coinbase_price=coinbase_price,
+            yes_book_age_ms=yes_book_age_ms,
+            no_book_age_ms=no_book_age_ms,
+            book_source=book_source,
         )
 
     def to_dict(self) -> dict[str, Any]:

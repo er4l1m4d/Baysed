@@ -10,6 +10,7 @@ import ssl
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
     RiskRepository, MarketRepository, MarketOutcomeRepository, EventLogRepository,
+    MarketActivityRepository,
 )
 
 
@@ -25,6 +26,7 @@ class RepositorySet:
         market: MarketRepository,
         market_outcome: MarketOutcomeRepository,
         event_log: EventLogRepository,
+        activity: MarketActivityRepository | None = None,
         session_factory=None,
     ):
         self.predictions = predictions
@@ -34,13 +36,15 @@ class RepositorySet:
         self.market = market
         self.market_outcome = market_outcome
         self.event_log = event_log
+        self.activity = activity
         self._session_factory = session_factory
 
     def set_shared_session(self, session):
         """Set a shared session on all repositories (for one scan cycle)."""
         for repo in [self.predictions, self.trades, self.bot_status,
-                     self.risk, self.market, self.market_outcome, self.event_log]:
-            if hasattr(repo, "set_shared_session"):
+                     self.risk, self.market, self.market_outcome, self.event_log,
+                     self.activity]:
+            if repo is not None and hasattr(repo, "set_shared_session"):
                 repo.set_shared_session(session)
 
     def clear_shared_session(self):
@@ -71,9 +75,12 @@ async def create_repositories(database_url: str) -> RepositorySet:
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
     needs_ssl = params.get("sslmode", [None])[0] == "require"
-    
-    # Remove ALL query params - asyncpg doesn't understand most of them
-    clean_url = urlunparse(parsed._replace(query=""))
+
+    # Remove ALL query params - asyncpg doesn't understand most of them.
+    # Only round-trip through urlunparse when there IS a query: for URLs with
+    # an empty netloc (SQLite), urlunparse mangles 'scheme:///path' into
+    # 'scheme:/path', which SQLAlchemy cannot parse (see error.md 2026-09-10).
+    clean_url = urlunparse(parsed._replace(query="")) if parsed.query else url
 
     # Configure SSL for asyncpg if needed
     connect_args = {}
@@ -84,10 +91,10 @@ async def create_repositories(database_url: str) -> RepositorySet:
         connect_args["ssl"] = ctx
 
     engine = create_async_engine(
-        clean_url, 
-        echo=False, 
+        clean_url,
+        echo=False,
         pool_pre_ping=True,
-        connect_args=connect_args if connect_args else None
+        connect_args=connect_args,  # {} is SQLAlchemy's effective default; None crashes it
     )
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -96,43 +103,48 @@ async def create_repositories(database_url: str) -> RepositorySet:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Create extra tables needed by repositories
+    # Create extra tables needed by repositories.
+    # DDL is dialect-aware: NOW() and SERIAL are PostgreSQL-only; SQLite
+    # needs INTEGER PRIMARY KEY for autoincrement and CURRENT_TIMESTAMP
+    # (which PostgreSQL also accepts).
+    is_sqlite = clean_url.startswith("sqlite")
+    auto_id = "INTEGER PRIMARY KEY" if is_sqlite else "SERIAL PRIMARY KEY"
     async with engine.begin() as conn:
-        await conn.execute(text("""
+        await conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS risk_state (
                 id INTEGER PRIMARY KEY DEFAULT 1,
-                state_json TEXT NOT NULL DEFAULT '{}',
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                state_json TEXT NOT NULL DEFAULT '{{}}',
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """))
-        await conn.execute(text("""
+        await conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS active_market (
                 id INTEGER PRIMARY KEY DEFAULT 1,
                 market_id VARCHAR(255) NOT NULL,
                 event_id VARCHAR(255) NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """))
-        await conn.execute(text("""
+        await conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS event_log (
-                id SERIAL PRIMARY KEY,
+                id {auto_id},
                 event VARCHAR(255) NOT NULL,
-                fields_json TEXT NOT NULL DEFAULT '{}',
-                recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                fields_json TEXT NOT NULL DEFAULT '{{}}',
+                recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """))
-        await conn.execute(text("""
+        await conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS market_outcomes (
-                id SERIAL PRIMARY KEY,
+                id {auto_id},
                 market_id VARCHAR(255) NOT NULL UNIQUE,
                 event_id VARCHAR(255) NOT NULL,
                 resolved_outcome_id VARCHAR(255) NOT NULL,
                 outcome_resolution VARCHAR(50) NOT NULL,
                 event_close_value TEXT,
                 btc_close_price NUMERIC,
-                resolved_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                resolved_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """))
 
@@ -140,7 +152,7 @@ async def create_repositories(database_url: str) -> RepositorySet:
         PostgresPredictionRepository, PostgresTradeRepository,
         PostgresBotStatusRepository, PostgresRiskRepository,
         PostgresMarketRepository, PostgresMarketOutcomeRepository,
-        PostgresEventLogRepository,
+        PostgresEventLogRepository, PostgresMarketActivityRepository,
     )
 
     return RepositorySet(
@@ -151,5 +163,6 @@ async def create_repositories(database_url: str) -> RepositorySet:
         market=PostgresMarketRepository(session_factory),
         market_outcome=PostgresMarketOutcomeRepository(session_factory),
         event_log=PostgresEventLogRepository(session_factory),
+        activity=PostgresMarketActivityRepository(session_factory),
         session_factory=session_factory,
     )

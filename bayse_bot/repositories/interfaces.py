@@ -202,6 +202,43 @@ class MarketRepository(ABC):
 
 
 # ---------------------------------------------------------------------------
+# Market Activity Repository
+# ---------------------------------------------------------------------------
+
+class MarketActivityRepository(ABC):
+    """Abstract interface for raw WS activity (trade print) persistence.
+
+    Raw-first: messages are stored as received (JSON) with best-effort
+    market/event IDs. Parsing into features happens at analysis time —
+    the message shapes are not fully known yet (channel newly subscribed
+    in Run 002).
+    """
+
+    @abstractmethod
+    async def insert_batch(self, rows: list[dict[str, Any]]) -> None:
+        """Insert a batch of activity rows.
+
+        Each row: {market_id, event_id, msg_type, raw}.
+        """
+        ...
+
+    @abstractmethod
+    async def get_activity(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        market_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get activity rows, newest first."""
+        ...
+
+    @abstractmethod
+    async def prune_older_than(self, hours: int = 48) -> int:
+        """Delete rows older than `hours`. Returns deleted row count."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Market Outcome Repository
 # ---------------------------------------------------------------------------
 

@@ -14,7 +14,7 @@ from .config import Settings
 from .feed import MarketState
 from .market import adapt_market, validate_market
 from .models import BTCFeatures, BookLevel, Market, OrderBook, Outcome, RunMode, EventType
-from .predictions import PredictionRecord, PredictionRecorder, market_implied_p_yes
+from .predictions import PredictionRecord, PredictionRecorder, market_implied_p_yes, book_state_from_snapshot
 from .repositories import RepositorySet
 from .resolution import ResolutionTracker
 from .risk import RiskManager
@@ -58,6 +58,7 @@ class Bot:
         state: MarketState,
         repos: RepositorySet,
         market_feed: BayseMarketFeed | None = None,
+        activity_buffer=None,
     ):
         self.s = settings
         self.client = client
@@ -71,6 +72,9 @@ class Bot:
         # Observation run metadata
         self.run_id = f"observation_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         self.model_version = "distance_to_strike_v2"
+        # Run 002 research instrumentation
+        self.activity_buffer = activity_buffer  # WS trade prints -> DB (drained per cycle)
+        self._coinbase_price: Decimal | None = None  # second BTC source, refreshed per cycle
 
     async def initialize(self) -> None:
         """Load persisted state on startup."""
@@ -83,6 +87,14 @@ class Bot:
         """Single scan cycle."""
         # Check for resolved predictions first
         await self._check_resolutions()
+
+        # Run 002 instrumentation: second BTC price source (Coinbase spot).
+        # Failure-isolated — a Coinbase outage must never affect the cycle.
+        await self._refresh_coinbase_price()
+
+        # Run 002 instrumentation: persist buffered WS trade prints, then
+        # prune activity rows older than the retention window.
+        await self._drain_activity()
 
         # Both sources are bounded to this BTC series. Never scan the full
         # catalog: that path can exceed the cycle timeout and roll back writes.
@@ -181,6 +193,57 @@ class Bot:
         if last_market:
             self._last_market_opens_at = last_market.opens_at
             self._last_market_closes_at = last_market.closes_at
+
+    async def _refresh_coinbase_price(self) -> None:
+        """Fetch BTC spot from Coinbase as a second price source.
+
+        Binance (via Bayse) is the prediction/resolution source; Coinbase
+        lets Run 002 analysis measure feed divergence. Best-effort: on any
+        failure the previous value is kept (stale) for one cycle, then
+        cleared — never blocks the cycle.
+        """
+        import aiohttp
+
+        if getattr(self, "_coinbase_failures", 0):
+            self._coinbase_failures -= 1
+            if self._coinbase_price is not None:
+                self._coinbase_price = None
+            return
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as http:
+                async with http.get("https://api.exchange.coinbase.com/products/BTC-USD/ticker") as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"HTTP {resp.status}")
+                    data = await resp.json()
+                    price = data.get("price")
+                    if price is not None:
+                        self._coinbase_price = Decimal(str(price))
+        except Exception as exc:
+            self._coinbase_failures = 2  # skip next 2 cycles before retrying
+            self._coinbase_price = None
+            log.debug("coinbase ticker fetch failed: %s: %s", type(exc).__name__, exc)
+
+    async def _drain_activity(self) -> None:
+        """Persist buffered WS activity messages and prune old rows.
+
+        Flush is capped so a message burst cannot dominate the cycle; the
+        buffer drops overflow with a warning (recorded in logs). Pruning
+        every cycle keeps the market_activity table bounded on Neon free
+        tier (48h retention, indexed delete).
+        """
+        if self.activity_buffer is None or getattr(self.repos, "activity", None) is None:
+            return
+        try:
+            rows = self.activity_buffer.drain(max_rows=200)
+            if rows:
+                await self.repos.activity.insert_batch(rows)
+                log.info("activity: persisted %d prints", len(rows))
+            dropped = self.activity_buffer.take_dropped_count()
+            if dropped:
+                log.warning("activity: dropped %d buffered prints (overflow)", dropped)
+            await self.repos.activity.prune_older_than(hours=48)
+        except Exception as exc:
+            log.warning("activity drain failed: %s: %s", type(exc).__name__, exc)
 
     def _adaptive_interval(self) -> int:
         """Determine scan interval based on market lifecycle position.
@@ -460,6 +523,7 @@ class Bot:
                     log.info("  books from REST API")
                 else:
                     # Use market last-trade prices as final fallback
+                    source = "synthetic_last_trade"
                     raw_market = market.raw.get("market", {}) if market.raw else {}
                     y_price = _dec(raw_market.get("outcome1Price"), "0.5")
                     n_price = _dec(raw_market.get("outcome2Price"), "0.5")
@@ -473,8 +537,33 @@ class Bot:
                         (BookLevel(n_price + spread, Decimal("1")),), now)
                     log.info("  no book data, using last-trade prices: YES=%s NO=%s", y_price, n_price)
 
+            # Run 002 research context from the WS store (None-safe; `store`
+            # is defined above in the book-source block)
+            market_last_price = None
+            market_volume = None
+            if store:
+                pstate = store.prices.get(market.event_id, {}).get(market.market_id)
+                if pstate:
+                    if pstate.get("price") is not None:
+                        market_last_price = Decimal(str(pstate["price"]))
+                    if pstate.get("volume") is not None:
+                        market_volume = Decimal(str(pstate["volume"]))
+                yes_age = store.book_age_ms(market.market_id, Outcome.YES) if source == "ws" else None
+                no_age = store.book_age_ms(market.market_id, Outcome.NO) if source == "ws" else None
+            else:
+                yes_age = no_age = None
+
             # Build canonical snapshot
-            snapshot = MarketSnapshot.from_market(market, self.state.btc_features, yes, no)
+            snapshot = MarketSnapshot.from_market(
+                market, self.state.btc_features, yes, no,
+                market_last_price=market_last_price,
+                market_volume=market_volume,
+                btc_daily_close=self.state.btc_daily_close,
+                coinbase_price=self._coinbase_price,
+                yes_book_age_ms=yes_age,
+                no_book_age_ms=no_age,
+                book_source=source,
+            )
             if not snapshot:
                 log.info("  snapshot unavailable (missing strike or closes_at), skipping")
                 return
@@ -575,6 +664,14 @@ class Bot:
                 yes_ask=snapshot.yes_ask,
                 no_ask=snapshot.no_ask,
                 spread=snapshot.spread,
+                # Run 002 research: full depth + context
+                book_state=book_state_from_snapshot(snapshot),
+                yes_book_age_ms=snapshot.yes_book_age_ms,
+                no_book_age_ms=snapshot.no_book_age_ms,
+                market_price=snapshot.market_last_price,
+                market_volume=snapshot.market_volume,
+                btc_daily_close=snapshot.btc_daily_close,
+                coinbase_btc_price=snapshot.coinbase_price,
                 strategy=decision.strategy,
                 probability=decision.probability,
                 predicted_outcome=decision.outcome.value if decision.outcome else "",
