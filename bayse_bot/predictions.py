@@ -140,6 +140,11 @@ class PredictionRecord:
     approved: bool = False
     reasons: tuple[str, ...] = ()
 
+    # Gate v2 (executable edge) — recorded on every snapshot for Run 002
+    p_calibrated: Decimal | None = None
+    exec_edge: Decimal | None = None
+    gate_version: str = ""
+
     # Both-side edges (for research)
     yes_edge: Decimal | None = None
     yes_edge_fee: Decimal | None = None

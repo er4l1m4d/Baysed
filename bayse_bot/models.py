@@ -165,6 +165,10 @@ class Decision:
     yes_edge_fee: Decimal | None = None
     no_edge: Decimal | None = None
     no_edge_fee: Decimal | None = None
+    # Gate v2 (executable edge) — recorded on every snapshot for Run 002
+    p_calibrated: Decimal | None = None
+    exec_edge: Decimal | None = None
+    gate_version: str = ""
 
 
 @dataclass

@@ -1,0 +1,129 @@
+{
+  "simulated_at": "2026-09-12T01:50:19.997Z",
+  "lookback_hours": 24,
+  "params": {
+    "size": 10,
+    "tick_improvement": 0.01,
+    "maker_fee": 0,
+    "one_position_per_market": true
+  },
+  "data_volume_warning": null,
+  "quotes": 1304,
+  "eligible_snapshots": 1304,
+  "markets": 95,
+  "prints_available": 4012,
+  "fills": 54,
+  "fill_rate": 0.0414,
+  "hit_rate_when_filled": 0.4259,
+  "hit_rate_when_quoted": 0.7592,
+  "adverse_selection_delta": -0.3333,
+  "pnl_flat": -83.7,
+  "fill_examples": [
+    {
+      "market_id": "c705f543",
+      "outcome": "YES",
+      "our_bid": 0.89,
+      "print_price": 0.8727,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 1.1,
+      "probability": 0.964407
+    },
+    {
+      "market_id": "aab8ca06",
+      "outcome": "NO",
+      "our_bid": 0.5,
+      "print_price": 0.07,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 5,
+      "probability": 0.5
+    },
+    {
+      "market_id": "fa4451b3",
+      "outcome": "NO",
+      "our_bid": 0.81,
+      "print_price": 0.7782,
+      "print_type": "SELL",
+      "correct": false,
+      "pnl": -8.1,
+      "probability": 0.045956
+    },
+    {
+      "market_id": "10a5271d",
+      "outcome": "YES",
+      "our_bid": 0.52,
+      "print_price": 0.2541,
+      "print_type": "SELL",
+      "correct": false,
+      "pnl": -5.2,
+      "probability": 0.534434
+    },
+    {
+      "market_id": "d4abb6be",
+      "outcome": "YES",
+      "our_bid": 0.58,
+      "print_price": 0.54,
+      "print_type": "SELL",
+      "correct": false,
+      "pnl": -5.8,
+      "probability": 0.581383
+    },
+    {
+      "market_id": "3edade4b",
+      "outcome": "YES",
+      "our_bid": 0.97,
+      "print_price": 0.96,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 0.3,
+      "probability": 0.99
+    },
+    {
+      "market_id": "47176b67",
+      "outcome": "NO",
+      "our_bid": 0.55,
+      "print_price": 0.49,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 4.5,
+      "probability": 0.448317
+    },
+    {
+      "market_id": "ff5951eb",
+      "outcome": "YES",
+      "our_bid": 0.56,
+      "print_price": 0.53,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 4.4,
+      "probability": 0.60845
+    },
+    {
+      "market_id": "cc3cf2fb",
+      "outcome": "NO",
+      "our_bid": 0.59,
+      "print_price": 0.51,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 4.1,
+      "probability": 0.408994
+    },
+    {
+      "market_id": "b012c772",
+      "outcome": "NO",
+      "our_bid": 0.59,
+      "print_price": 0.407,
+      "print_type": "SELL",
+      "correct": true,
+      "pnl": 4.1,
+      "probability": 0.423991
+    }
+  ],
+  "limitations": [
+    "24h of data, 54 fills — small sample (42.6% +/- 6.7pp SE)",
+    "quotes treated as active from their snapshot until market close (no staleness expiry) — slight fill-rate overcount",
+    "maker fee assumed 0; queue position assumed best (price improvement attracts sellers first)",
+    "one position per market; first-hit snapshot wins"
+  ]
+}

@@ -681,6 +681,10 @@ class Bot:
                 signal_strength=decision.strength,
                 approved=decision.approved and not reasons,
                 reasons=tuple(reasons),
+                # Gate v2 (executable edge) — recorded for Run 002 distribution analysis
+                p_calibrated=decision.p_calibrated,
+                exec_edge=decision.exec_edge,
+                gate_version=decision.gate_version,
                 # Both-side edges (for research)
                 yes_edge=decision.yes_edge,
                 yes_edge_fee=decision.yes_edge_fee,

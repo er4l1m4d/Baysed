@@ -51,6 +51,11 @@ class Prediction(Base):
     btc_daily_close = Column(Numeric(20, 8))   # BTC at last 00:00 UTC rollover
     coinbase_btc_price = Column(Numeric(20, 8))  # BTC spot from Coinbase (2nd source)
 
+    # Gate v2 (executable edge) — recorded on every snapshot for Run 002
+    p_calibrated = Column(Numeric(10, 6))  # calibration-discounted P(yes)
+    exec_edge = Column(Numeric(10, 6))     # executable edge after fees + slippage
+    gate_version = Column(String(50))      # e.g. "v2_exec_edge"; NULL = Run 001 disagreement gate
+
     # Strategy output
     strategy = Column(String(100), nullable=False)
     probability = Column(Numeric(10, 6))

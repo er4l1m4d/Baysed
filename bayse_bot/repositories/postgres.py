@@ -246,6 +246,10 @@ class PostgresPredictionRepository(_SessionMixin, PredictionRepository):
             "market_volume": float(pred.market_volume) if pred.market_volume else None,
             "btc_daily_close": float(pred.btc_daily_close) if pred.btc_daily_close else None,
             "coinbase_btc_price": float(pred.coinbase_btc_price) if pred.coinbase_btc_price else None,
+            # Gate v2
+            "p_calibrated": float(pred.p_calibrated) if pred.p_calibrated is not None else None,
+            "exec_edge": float(pred.exec_edge) if pred.exec_edge is not None else None,
+            "gate_version": pred.gate_version or None,
             "strategy": pred.strategy,
             "probability": float(pred.probability) if pred.probability else None,
             "predicted_outcome": pred.predicted_outcome or "",

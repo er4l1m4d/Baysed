@@ -127,6 +127,10 @@ class PredictionResponse(BaseModel):
     market_volume: float | None = None
     btc_daily_close: float | None = None
     coinbase_btc_price: float | None = None
+    # Gate v2 (executable edge)
+    p_calibrated: float | None = None
+    exec_edge: float | None = None
+    gate_version: str | None = None
 
 
 class ActivityResponse(BaseModel):
@@ -657,6 +661,10 @@ async def get_predictions(
             market_volume=float(p.market_volume) if p.market_volume is not None else None,
             btc_daily_close=float(p.btc_daily_close) if p.btc_daily_close is not None else None,
             coinbase_btc_price=float(p.coinbase_btc_price) if p.coinbase_btc_price is not None else None,
+            # Gate v2
+            p_calibrated=float(p.p_calibrated) if p.p_calibrated is not None else None,
+            exec_edge=float(p.exec_edge) if p.exec_edge is not None else None,
+            gate_version=p.gate_version or None,
         )
         for p in predictions
     ]

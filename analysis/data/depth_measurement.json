@@ -1,0 +1,44 @@
+{
+  "measured_at": "2026-09-12T01:34:07.247Z",
+  "sample": 300,
+  "ask_depth_walk": {
+    "size_5": {
+      "n": 544,
+      "insufficient_depth_share": 0.0933,
+      "median_slip": 0.012,
+      "p90_slip": 0.3207,
+      "max_slip": 0.8371
+    },
+    "size_10": {
+      "n": 517,
+      "insufficient_depth_share": 0.1383,
+      "median_slip": 0.022,
+      "p90_slip": 0.4629,
+      "max_slip": 0.8736
+    },
+    "size_25": {
+      "n": 386,
+      "insufficient_depth_share": 0.3567,
+      "median_slip": 0.0424,
+      "p90_slip": 0.255,
+      "max_slip": 0.7923
+    },
+    "size_50": {
+      "n": 261,
+      "insufficient_depth_share": 0.565,
+      "median_slip": 0.0524,
+      "p90_slip": 0.1603,
+      "max_slip": 0.3511
+    }
+  },
+  "qty_at_best_ask": {
+    "median": 2,
+    "p10": 1,
+    "p90": 3.7037
+  },
+  "ask_level_counts": {
+    "median": 7,
+    "max": 10
+  },
+  "conclusion_tentative": "books are thin; slip constant 0.01 for size<=10 is plausible pending more data"
+}

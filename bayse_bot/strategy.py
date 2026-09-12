@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import math
 from .config import Settings
+from .gate import evaluate_gate
 from .models import BTCFeatures, Decision, Outcome
 from .snapshot import MarketSnapshot
 
@@ -110,12 +111,11 @@ class DistanceToStrikeModel(Strategy):
     version = MODEL_VERSION
 
     def evaluate(self, x: StrategyInput, s: Settings) -> Decision:
-        reasons = []
         snap = x.snapshot
 
         if not snap.btc_complete:
-            reasons.append("btc_data_incomplete_or_stale")
-            return Decision(self.name, None, None, None, None, Decimal("0"), False, tuple(reasons))
+            return Decision(self.name, None, None, None, None, Decimal("0"), False,
+                            ("btc_data_incomplete_or_stale",))
 
         # Compute probability from snapshot (canonical source)
         probability = probability_from_distance_to_strike(
@@ -135,7 +135,7 @@ class DistanceToStrikeModel(Strategy):
         outcome = Outcome.YES if probability > Decimal("0.5") else Outcome.NO
         price = snap.yes_ask if outcome is Outcome.YES else snap.no_ask
 
-        # Selected side edge (for backward compat)
+        # Selected side edge (for research)
         edge = yes_edge if outcome is Outcome.YES else no_edge
         edge_fee = yes_edge_fee if outcome is Outcome.YES else no_edge_fee
 
@@ -144,29 +144,18 @@ class DistanceToStrikeModel(Strategy):
         expected_move = snap.realized_volatility * time_frac.sqrt() if time_frac > 0 and snap.realized_volatility > 0 else Decimal("1")
         strength = abs(snap.distance_from_strike_pct) / expected_move if expected_move > 0 else Decimal("0")
 
-        # Book quality checks
-        if snap.yes_ask is None or snap.no_ask is None:
-            reasons.append("missing_book_prices")
-
-        # Edge guards — use fee-adjusted edge for approval decisions
-        if edge is not None and edge < s.min_model_gap:
-            reasons.append("model_edge_below_minimum")
-        if edge is not None and edge > s.max_model_gap:
-            reasons.append("model_edge_above_guardrail")
-        if edge_fee is not None and edge_fee < 0:
-            reasons.append("negative_edge_after_fees")
-        if strength < s.min_strength:
-            reasons.append("signal_strength_below_minimum")
-
-        # Time guard: don't trade in last minute
-        if snap.seconds_remaining < 60:
-            reasons.append("too_close_to_expiry")
+        # Approval gate v2: execution-aware EV (calibrated probability,
+        # fee-adjusted breakeven, measured slippage). Replaces the Run-001
+        # disagreement guards, which were anti-selective (see bayse_bot/gate.py).
+        gate = evaluate_gate(snap, probability, strength, s)
 
         return Decision(
             self.name, outcome, probability, edge, edge_fee, strength,
-            not reasons, tuple(reasons),
+            gate.approved, gate.reasons,
             yes_edge=yes_edge, yes_edge_fee=yes_edge_fee,
             no_edge=no_edge, no_edge_fee=no_edge_fee,
+            p_calibrated=gate.p_calibrated, exec_edge=gate.exec_edge,
+            gate_version=gate.gate_version,
         )
 
 # ---------------------------------------------------------------------------

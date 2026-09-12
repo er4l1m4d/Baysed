@@ -65,6 +65,10 @@ PREDICTION_COLUMNS = [
     ("market_volume", "NUMERIC(20, 8)"),
     ("btc_daily_close", "NUMERIC(20, 8)"),
     ("coinbase_btc_price", "NUMERIC(20, 8)"),
+    # Gate v2 (executable edge)
+    ("p_calibrated", "NUMERIC(10, 6)"),
+    ("exec_edge", "NUMERIC(10, 6)"),
+    ("gate_version", "VARCHAR(50)"),
 ]
 
 BOT_STATUS_COLUMNS = [

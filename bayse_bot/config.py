@@ -34,6 +34,8 @@ class Settings:
     min_model_gap: Decimal = field(default_factory=lambda: _decimal("MIN_MODEL_ENTRY_GAP", "0.08"))
     max_model_gap: Decimal = field(default_factory=lambda: _decimal("MAX_MODEL_ENTRY_GAP", "0.18"))
     min_strength: Decimal = field(default_factory=lambda: _decimal("MIN_SIGNAL_STRENGTH", "0.35"))
+    min_exec_edge: Decimal = field(default_factory=lambda: _decimal("MIN_EXEC_EDGE", "0.02"))
+    max_exec_edge: Decimal = field(default_factory=lambda: _decimal("MAX_EXEC_EDGE", "0.15"))
     quote_max_age: int = field(default_factory=lambda: int(os.getenv("MAX_EXECUTION_QUOTE_AGE_S", "20")))
     execution_tolerance: Decimal = field(default_factory=lambda: _decimal("EXECUTION_PRICE_TOLERANCE_ABS", "0.01"))
     strategy: str = field(default_factory=lambda: os.getenv("STRATEGY", "distance_to_strike"))
