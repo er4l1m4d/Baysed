@@ -54,6 +54,10 @@ export interface Prediction {
   yes_edge_fee: number | null;
   no_edge: number | null;
   no_edge_fee: number | null;
+  // Gate v2 — executable-edge fields recorded on every snapshot (Phase C)
+  p_calibrated: number | null;
+  exec_edge: number | null;
+  gate_version: string | null;
   model_version: string | null;
   run_id: string | null;
   // Timestamps

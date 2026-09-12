@@ -89,6 +89,13 @@ function ExpandedDetail({ pred }: { pred: Prediction }) {
             <Detail label="Signal strength">
               {pred.signal_strength.toFixed(3)}
             </Detail>
+            <Detail label="Calibrated P">
+              {pred.p_calibrated != null ? pct(pred.p_calibrated, 2) : "--"}
+            </Detail>
+            <Detail label="Exec edge">
+              {pred.exec_edge != null ? signed(pred.exec_edge, 4) : "--"}
+            </Detail>
+            <Detail label="Gate">{pred.gate_version || "—"}</Detail>
             <Detail label="Approved">{pred.approved ? "Yes" : "No"}</Detail>
             {pred.reasons && pred.reasons.length > 0 && (
               <div className="flex flex-wrap gap-1.5 pt-2">

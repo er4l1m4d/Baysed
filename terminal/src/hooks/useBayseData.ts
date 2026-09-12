@@ -111,8 +111,45 @@ export function usePredictions(limit = 20, resolution?: string) {
   return { predictions, loading };
 }
 
-export function useTrades(limit = 50) {
-  const [trades, setTrades] = useState<Trade[]>([]);
+/**
+ * Large batch fetch for client-side analytics aggregation.
+ * Pulls many snapshots at once (default 3000) and refreshes slowly.
+ */
+export function usePredictionsBatch(limit = 3000, resolution?: string) {
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchBatch() {
+      try {
+        const data = await getPredictions(limit, 0, resolution);
+        if (active) {
+          setPredictions(data);
+          setLastUpdated(new Date());
+        }
+      } catch (e) {
+        console.error("Failed to fetch prediction batch:", e);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchBatch();
+    const interval = setInterval(fetchBatch, 60000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [limit, resolution]);
+
+  return { predictions, loading, lastUpdated };
+}
+
+export function useTrades(limit = 50) {  const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
