@@ -1,0 +1,266 @@
+{
+  "meta": {
+    "run001_core_rows": 21991,
+    "fit_rows": 9342,
+    "eval_rows": 12649,
+    "split_at": "2026-09-06T00:00:00Z",
+    "baseline_replay_max_deviation": 0.00012310940457582742,
+    "note": "calibration layer held constant across candidates; isolates MODEL STRUCTURE"
+  },
+  "calibration_gaps_fit_window": [
+    {
+      "bucket": "0-10%",
+      "gap": -0.0394
+    },
+    {
+      "bucket": "10-20%",
+      "gap": -0.0768
+    },
+    {
+      "bucket": "20-30%",
+      "gap": -0.0385
+    },
+    {
+      "bucket": "30-40%",
+      "gap": -0.0373
+    },
+    {
+      "bucket": "40-50%",
+      "gap": -0.0737
+    },
+    {
+      "bucket": "50-60%",
+      "gap": 0.0219
+    },
+    {
+      "bucket": "60-70%",
+      "gap": 0.064
+    },
+    {
+      "bucket": "70-80%",
+      "gap": 0.0227
+    },
+    {
+      "bucket": "80-90%",
+      "gap": 0.0532
+    },
+    {
+      "bucket": "90-100%",
+      "gap": 0.0294
+    }
+  ],
+  "fitted_params": {
+    "M0_baseline": {
+      "label": "distance_to_strike_v2 (frozen)",
+      "params": {}
+    },
+    "M1_hour0_hedge": {
+      "label": "baseline + hour-0 humility (shrink toward 0.5)",
+      "params": {
+        "h": 0.1
+      }
+    },
+    "M3_momentum_blend": {
+      "label": "distance + momentum blend (w fitted)",
+      "params": {
+        "w": 0.1
+      }
+    },
+    "M4_vol_humility": {
+      "label": "distance + vol-scaling humility (f, T, V fitted)",
+      "params": {
+        "f": 1.5,
+        "T": 300,
+        "V": 0.15
+      }
+    }
+  },
+  "full_window_in_sample": {
+    "M0_baseline": {
+      "model": "M0_baseline",
+      "label": "distance_to_strike_v2 (frozen)",
+      "params": {},
+      "n_scored": 22715,
+      "brier_raw_model": 0.1514,
+      "brier_calibrated_model": 0.1505,
+      "approved_n": 744,
+      "approved_share": 0.0328,
+      "accuracy": 0.6976,
+      "taker_sim": {
+        "n": 744,
+        "hit_rate": 0.6976,
+        "mean_roi_per_trade": -0.0696,
+        "total_roi_flat_1u": -51.7982
+      },
+      "market_level": {
+        "paired_markets": 257,
+        "t_stat": -1.5165
+      }
+    },
+    "M1_hour0_hedge": {
+      "model": "M1_hour0_hedge",
+      "label": "baseline + hour-0 humility (shrink toward 0.5)",
+      "params": {
+        "h": 0.1
+      },
+      "n_scored": 22715,
+      "brier_raw_model": 0.1513,
+      "brier_calibrated_model": 0.1504,
+      "approved_n": 744,
+      "approved_share": 0.0328,
+      "accuracy": 0.6976,
+      "taker_sim": {
+        "n": 744,
+        "hit_rate": 0.6976,
+        "mean_roi_per_trade": -0.0696,
+        "total_roi_flat_1u": -51.7982
+      },
+      "market_level": {
+        "paired_markets": 257,
+        "t_stat": -1.5165
+      }
+    },
+    "M3_momentum_blend": {
+      "model": "M3_momentum_blend",
+      "label": "distance + momentum blend (w fitted)",
+      "params": {
+        "w": 0.1
+      },
+      "n_scored": 22715,
+      "brier_raw_model": 0.1515,
+      "brier_calibrated_model": 0.1521,
+      "approved_n": 545,
+      "approved_share": 0.024,
+      "accuracy": 0.7083,
+      "taker_sim": {
+        "n": 545,
+        "hit_rate": 0.7083,
+        "mean_roi_per_trade": -0.0305,
+        "total_roi_flat_1u": -16.6344
+      },
+      "market_level": {
+        "paired_markets": 197,
+        "t_stat": -1.8159
+      }
+    },
+    "M4_vol_humility": {
+      "model": "M4_vol_humility",
+      "label": "distance + vol-scaling humility (f, T, V fitted)",
+      "params": {
+        "f": 1.5,
+        "T": 300,
+        "V": 0.15
+      },
+      "n_scored": 22715,
+      "brier_raw_model": 0.1507,
+      "brier_calibrated_model": 0.1527,
+      "approved_n": 218,
+      "approved_share": 0.0096,
+      "accuracy": 0.7339,
+      "taker_sim": {
+        "n": 218,
+        "hit_rate": 0.7339,
+        "mean_roi_per_trade": -0.0374,
+        "total_roi_flat_1u": -8.1533
+      },
+      "market_level": {
+        "paired_markets": 90,
+        "t_stat": -0.9324
+      }
+    }
+  },
+  "eval_window_temporal": {
+    "M0_baseline": {
+      "model": "M0_baseline",
+      "label": "distance_to_strike_v2 (frozen)",
+      "params": {},
+      "n_scored": 12649,
+      "brier_raw_model": 0.1516,
+      "brier_calibrated_model": 0.152,
+      "approved_n": 316,
+      "approved_share": 0.025,
+      "accuracy": 0.6835,
+      "taker_sim": {
+        "n": 316,
+        "hit_rate": 0.6835,
+        "mean_roi_per_trade": -0.0864,
+        "total_roi_flat_1u": -27.2968
+      },
+      "market_level": {
+        "paired_markets": 119,
+        "t_stat": -0.8083
+      }
+    },
+    "M1_hour0_hedge": {
+      "model": "M1_hour0_hedge",
+      "label": "baseline + hour-0 humility (shrink toward 0.5)",
+      "params": {
+        "h": 0.1
+      },
+      "n_scored": 12649,
+      "brier_raw_model": 0.1514,
+      "brier_calibrated_model": 0.1519,
+      "approved_n": 316,
+      "approved_share": 0.025,
+      "accuracy": 0.6835,
+      "taker_sim": {
+        "n": 316,
+        "hit_rate": 0.6835,
+        "mean_roi_per_trade": -0.0864,
+        "total_roi_flat_1u": -27.2968
+      },
+      "market_level": {
+        "paired_markets": 119,
+        "t_stat": -0.8083
+      }
+    },
+    "M3_momentum_blend": {
+      "model": "M3_momentum_blend",
+      "label": "distance + momentum blend (w fitted)",
+      "params": {
+        "w": 0.1
+      },
+      "n_scored": 12649,
+      "brier_raw_model": 0.1518,
+      "brier_calibrated_model": 0.1542,
+      "approved_n": 235,
+      "approved_share": 0.0186,
+      "accuracy": 0.6936,
+      "taker_sim": {
+        "n": 235,
+        "hit_rate": 0.6936,
+        "mean_roi_per_trade": -0.0557,
+        "total_roi_flat_1u": -13.0994
+      },
+      "market_level": {
+        "paired_markets": 91,
+        "t_stat": -1.6183
+      }
+    },
+    "M4_vol_humility": {
+      "model": "M4_vol_humility",
+      "label": "distance + vol-scaling humility (f, T, V fitted)",
+      "params": {
+        "f": 1.5,
+        "T": 300,
+        "V": 0.15
+      },
+      "n_scored": 12649,
+      "brier_raw_model": 0.1517,
+      "brier_calibrated_model": 0.1568,
+      "approved_n": 74,
+      "approved_share": 0.0059,
+      "accuracy": 0.7703,
+      "taker_sim": {
+        "n": 74,
+        "hit_rate": 0.7703,
+        "mean_roi_per_trade": 0.02,
+        "total_roi_flat_1u": 1.483
+      },
+      "market_level": {
+        "paired_markets": 34,
+        "t_stat": -0.7
+      }
+    }
+  }
+}
