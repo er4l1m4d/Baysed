@@ -1,10 +1,13 @@
-// Fetch all Run 001 predictions from the live API into analysis/data/
-// Usage: node analysis/fetch.js
+// Fetch predictions from the live API into analysis/data/.
+// Usage:
+//   node analysis/fetch.js            # Run 001 core (resolved + pending + cross-checks)
+//   RUN2=1 node analysis/fetch.js     # Run 002 (gate_version=v2_exec_edge era) -> run2.json
 const fs = require("fs");
 const path = require("path");
 
 const API = "https://baysed.onrender.com";
 const OUT_DIR = path.join(__dirname, "data");
+const RUN2 = !!process.env.RUN2;
 
 async function getJSON(url, retries = 4) {
   for (let i = 0; i <= retries; i++) {
@@ -38,6 +41,20 @@ async function fetchAllPages(base) {
 
 (async () => {
   fs.mkdirSync(OUT_DIR, { recursive: true });
+
+  if (RUN2) {
+    console.log("RUN2 mode: fetching gate-v2 era (gate_version=v2_exec_edge)...");
+    const all = await fetchAllPages("/predictions");
+    const run2 = all.filter(
+      (r) => r.gate_version === "v2_exec_edge" && r.probability != null
+    );
+    fs.writeFileSync(path.join(OUT_DIR, "run2.json"), JSON.stringify(run2));
+    console.log(`run2 (gate-v2, modeled): ${run2.length}`);
+    const f = await getJSON(`${API}/calibration`);
+    fs.writeFileSync(path.join(OUT_DIR, "run2_calibration.json"), JSON.stringify(f, null, 2));
+    console.log("Done.");
+    return;
+  }
 
   console.log("Fetching resolved predictions...");
   const resolved = await fetchAllPages("/predictions?resolution=resolved&include_book=true");

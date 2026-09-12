@@ -26,7 +26,8 @@ const path = require("path");
 const API = "https://baysed.onrender.com";
 const RUN1_START = Date.parse("2026-09-02T00:00:00Z");
 const RUN1_END = Date.parse("2026-09-10T22:00:00Z");
-const FIT_END = Date.parse("2026-09-06T00:00:00Z");
+const RUN2 = !!process.env.RUN2;
+let FIT_END = Date.parse("2026-09-06T00:00:00Z");
 
 const r4 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10000) / 10000);
 const mean = (a, f = (x) => x) => (a.length ? a.reduce((s, x) => s + f(x), 0) / a.length : null);
@@ -282,13 +283,23 @@ async function fetchAll(base) {
 }
 
 (async () => {
-  console.log("fetching Run 001 predictions (with raw features)...");
-  const raw = (await fetchAll("/predictions")).filter(
-    (r) =>
-      Date.parse(r.recorded_at) >= RUN1_START &&
-      Date.parse(r.recorded_at) < RUN1_END &&
-      r.model_version === "distance_to_strike_v2"
-  );
+  let raw;
+  if (RUN2) {
+    console.log("RUN2 mode: loading data/run2.json (gate-v2 era)...");
+    raw = require("./data/run2.json").filter(
+      (r) => r.gate_version === "v2_exec_edge" && r.probability != null
+    );
+    const ts = raw.map((r) => Date.parse(r.recorded_at)).sort((a, b) => a - b);
+    FIT_END = ts[Math.floor(ts.length * 0.4)];
+  } else {
+    console.log("fetching Run 001 predictions (with raw features)...");
+    raw = await fetchAll("/predictions").filter(
+      (r) =>
+        Date.parse(r.recorded_at) >= RUN1_START &&
+        Date.parse(r.recorded_at) < RUN1_END &&
+        r.model_version === "distance_to_strike_v2"
+    );
+  }
   console.log(`Run 001 core rows: ${raw.length}`);
 
   // Restrict evaluation universe to well-defined model rows. Some Run 001

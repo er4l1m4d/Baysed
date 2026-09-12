@@ -15,18 +15,28 @@
 const fs = require("fs");
 const path = require("path");
 
-const all = require("./data/resolved.json");
+const RUN2 = !!process.env.RUN2;
+const all = require(RUN2 ? "./data/run2.json" : "./data/resolved.json");
 const RUN1_START = Date.parse("2026-09-02T00:00:00Z");
 const RUN1_END = Date.parse("2026-09-10T22:00:00Z");
-const FIT_END = Date.parse("2026-09-06T00:00:00Z"); // temporal split for honest calibration
 
-const rows = all.filter(
-  (r) =>
-    Date.parse(r.recorded_at) >= RUN1_START &&
-    Date.parse(r.recorded_at) < RUN1_END &&
-    r.model_version === "distance_to_strike_v2" &&
-    r.probability != null
-);
+const rows = RUN2
+  ? all.filter((r) => r.gate_version === "v2_exec_edge" && r.probability != null)
+  : all.filter(
+      (r) =>
+        Date.parse(r.recorded_at) >= RUN1_START &&
+        Date.parse(r.recorded_at) < RUN1_END &&
+        r.model_version === "distance_to_strike_v2" &&
+        r.probability != null
+    );
+
+// Temporal split: Run 001 uses a fixed fit window; Run 002 uses first 40% as fit.
+const FIT_END = RUN2
+  ? (() => {
+      const ts = rows.map((r) => Date.parse(r.recorded_at)).sort((a, b) => a - b);
+      return ts[Math.floor(ts.length * 0.4)];
+    })()
+  : Date.parse("2026-09-06T00:00:00Z"); // temporal split for honest calibration
 
 const actual = (r) => (r.outcome_resolution === "yes_won" ? 1 : 0);
 const r4 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10000) / 10000);
