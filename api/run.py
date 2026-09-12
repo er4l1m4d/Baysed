@@ -28,9 +28,26 @@ async def broadcast_loop():
         await asyncio.sleep(1)
 
 
+async def feed_checkpoint_loop(feed, repos, stop: asyncio.Event, interval: float = 20.0):
+    """Persist the BTC feed's candle buffer so a restart skips the warm-up.
+
+    Writes only when a new candle has finalized (at most ~1/min), using a
+    fresh session (not the scan-cycle shared one) so it never contends with
+    the engine's per-cycle transaction.
+    """
+    last_written = -1
+    while not stop.is_set():
+        try:
+            if feed.finalized_count != last_written and feed.last_price is not None:
+                await repos.feed_state.save_candles(feed.serialize_candles())
+                last_written = feed.finalized_count
+        except Exception as e:
+            log.debug("feed checkpoint save skipped: %s", e)
+        await asyncio.sleep(interval)
+
+
 async def start_bot_engine():
     """Start the trading engine as a background task."""
-    log.info("bot engine task starting...")
     try:
         from bayse_bot.config import Settings
         from bayse_bot.engine import Bot
@@ -55,8 +72,20 @@ async def start_bot_engine():
 
         stop = asyncio.Event()
 
+        # Skip the ~22-min feature warm-up after a restart by reloading the
+        # engine's OWN tick-derived candles from the last checkpoint. Same
+        # source/units/phase => no feature contamination. If the checkpoint is
+        # missing or stale, restore_candles() ignores it and we warm up normally.
+        try:
+            checkpoint = await repos.feed_state.load_candles()
+            if checkpoint:
+                feed.restore_candles(checkpoint, max_age_seconds=300)
+        except Exception as e:
+            log.warning("feed checkpoint restore failed (warming up normally): %s", e)
+
         btc_task = asyncio.create_task(feed.run(stop))
         market_task = asyncio.create_task(market_feed.run(stop, on_trade=activity_buffer.add))
+        checkpoint_task = asyncio.create_task(feed_checkpoint_loop(feed, repos, stop))
 
         for _ in range(50):
             if feed.last_price:

@@ -67,8 +67,30 @@ async def main():
         except NotImplementedError:
             pass
 
+    # Reload the engine's own candles from the last checkpoint to skip the
+    # ~22-min warm-up after a restart (falls back to warm-up if missing/stale).
+    try:
+        _ck = await repos.feed_state.load_candles()
+        if _ck:
+            feed.restore_candles(_ck, max_age_seconds=300)
+    except Exception as e:
+        log.warning("feed checkpoint restore failed (warming up): %s", e)
+
     btc_task = asyncio.create_task(feed.run(stop))
     market_task = asyncio.create_task(market_feed.run(stop))
+
+    async def _checkpoint():
+        last = -1
+        while not stop.is_set():
+            try:
+                if feed.finalized_count != last and feed.last_price is not None:
+                    await repos.feed_state.save_candles(feed.serialize_candles())
+                    last = feed.finalized_count
+            except Exception as e:
+                log.debug("feed checkpoint save skipped: %s", e)
+            await asyncio.sleep(20)
+
+    checkpoint_task = asyncio.create_task(_checkpoint())
 
     # Wait briefly for initial BTC data to arrive before starting the bot loop
     for _ in range(50):

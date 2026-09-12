@@ -10,7 +10,7 @@ import ssl
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
     RiskRepository, MarketRepository, MarketOutcomeRepository, EventLogRepository,
-    MarketActivityRepository,
+    MarketActivityRepository, FeedStateRepository,
 )
 
 
@@ -27,6 +27,7 @@ class RepositorySet:
         market_outcome: MarketOutcomeRepository,
         event_log: EventLogRepository,
         activity: MarketActivityRepository | None = None,
+        feed_state: FeedStateRepository | None = None,
         session_factory=None,
     ):
         self.predictions = predictions
@@ -37,10 +38,14 @@ class RepositorySet:
         self.market_outcome = market_outcome
         self.event_log = event_log
         self.activity = activity
+        self.feed_state = feed_state
         self._session_factory = session_factory
 
     def set_shared_session(self, session):
         """Set a shared session on all repositories (for one scan cycle)."""
+        # feed_state is intentionally excluded: the checkpoint writer runs as a
+        # separate periodic task and must use its OWN session, never share the
+        # scan-cycle transaction (AsyncSession is not safe for concurrent use).
         for repo in [self.predictions, self.trades, self.bot_status,
                      self.risk, self.market, self.market_outcome, self.event_log,
                      self.activity]:
@@ -147,12 +152,20 @@ async def create_repositories(database_url: str) -> RepositorySet:
                 recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """))
+        await conn.execute(text(f"""
+            CREATE TABLE IF NOT EXISTS feed_state (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                candles_json TEXT NOT NULL DEFAULT '[]',
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
 
     from .postgres import (
         PostgresPredictionRepository, PostgresTradeRepository,
         PostgresBotStatusRepository, PostgresRiskRepository,
         PostgresMarketRepository, PostgresMarketOutcomeRepository,
         PostgresEventLogRepository, PostgresMarketActivityRepository,
+        PostgresFeedStateRepository,
     )
 
     return RepositorySet(
@@ -164,5 +177,6 @@ async def create_repositories(database_url: str) -> RepositorySet:
         market_outcome=PostgresMarketOutcomeRepository(session_factory),
         event_log=PostgresEventLogRepository(session_factory),
         activity=PostgresMarketActivityRepository(session_factory),
+        feed_state=PostgresFeedStateRepository(session_factory),
         session_factory=session_factory,
     )

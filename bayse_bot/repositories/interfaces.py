@@ -285,3 +285,25 @@ class EventLogRepository(ABC):
     ) -> list[dict[str, Any]]:
         """Get recent events with optional filter."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# Feed State Repository (BTC candle checkpoint across restarts)
+# ---------------------------------------------------------------------------
+
+class FeedStateRepository(ABC):
+    """Persistent checkpoint of the BTC feed's candle buffer.
+
+    Lets the engine reload its OWN tick-derived candles on boot so the
+    ~22-minute feature warm-up is skipped after a restart/deploy.
+    """
+
+    @abstractmethod
+    async def load_candles(self) -> list[list[str]] | None:
+        """Return the last checkpointed candle snapshot, or None."""
+        ...
+
+    @abstractmethod
+    async def save_candles(self, candles: list[list[str]]) -> None:
+        """Upsert the candle snapshot (single-row blob)."""
+        ...

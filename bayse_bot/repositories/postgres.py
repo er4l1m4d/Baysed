@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .interfaces import (
     PredictionRepository, TradeRepository, BotStatusRepository,
     RiskRepository, MarketRepository, MarketOutcomeRepository, EventLogRepository,
-    MarketActivityRepository,
+    MarketActivityRepository, FeedStateRepository,
 )
 
 
@@ -743,3 +743,36 @@ class PostgresMarketActivityRepository(_SessionMixin, MarketActivityRepository):
                 delete(MarketActivity).where(MarketActivity.recorded_at < cutoff)
             )
             return result.rowcount or 0
+
+
+class PostgresFeedStateRepository(_SessionMixin, FeedStateRepository):
+    """Single-row JSON checkpoint of the BTC feed candle buffer (Postgres/SQLite)."""
+
+    async def load_candles(self) -> list[list[str]] | None:
+        import json
+        async with self._session() as s:
+            result = await s.execute(
+                text("SELECT candles_json FROM feed_state WHERE id = 1")
+            )
+            row = result.fetchone()
+            if not row or row[0] is None:
+                return None
+            try:
+                data = json.loads(row[0])
+            except (ValueError, TypeError):
+                return None
+            return data if isinstance(data, list) else None
+
+    async def save_candles(self, candles: list[list[str]]) -> None:
+        import json
+        payload = json.dumps(candles)
+        async with self._session() as s:
+            await s.execute(
+                text("""
+                    INSERT INTO feed_state (id, candles_json, updated_at)
+                    VALUES (1, :candles_json, :updated_at)
+                    ON CONFLICT (id) DO UPDATE
+                    SET candles_json = :candles_json, updated_at = :updated_at
+                """),
+                {"candles_json": payload, "updated_at": datetime.now(timezone.utc)},
+            )

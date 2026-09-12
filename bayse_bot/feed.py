@@ -87,8 +87,70 @@ class BayseFeed:
         self._candle_close: Decimal = Decimal("0")
         self._candle_volume: Decimal = Decimal("0")
 
+        # Count of finalized candles since construction — lets the checkpoint
+        # writer know when the buffer has actually changed (no point writing
+        # the same snapshot every second).
+        self._finalized_count: int = 0
+
         # UTC-day tracking for daily-close capture (Binance daily candle close)
         self._utc_day: date | None = None
+
+    @property
+    def finalized_count(self) -> int:
+        return self._finalized_count
+
+    def serialize_candles(self) -> list[list[str]]:
+        """Checkpointable snapshot of finalized candles.
+
+        Stored as [iso8601, close_str, volume_str] rows — the engine's OWN
+        tick-derived candles (tick-count volume, original phase), so reloading
+        them introduces no unit or timestamp mismatch.
+        """
+        return [[t.isoformat(), str(p), str(v)] for (t, p, v) in self.candles]
+
+    def restore_candles(
+        self, serialized: list[list[str]] | None, *, max_age_seconds: int = 300,
+        now: datetime | None = None,
+    ) -> bool:
+        """Seed the candle buffer from a checkpoint if it is fresh enough.
+
+        Returns True when the buffer was restored. If the newest checkpointed
+        candle is older than ``max_age_seconds`` we ignore it and let the feed
+        warm up normally — restoring stale candles would poison volatility
+        with a dead window, which is worse for a measurement run than a clean
+        (null-probability) warm-up.
+        """
+        if not serialized:
+            return False
+        now = now or datetime.now(timezone.utc)
+        try:
+            newest = datetime.fromisoformat(serialized[-1][0])
+            if newest.tzinfo is None:
+                newest = newest.replace(tzinfo=timezone.utc)
+            age = (now - newest).total_seconds()
+            if age > max_age_seconds:
+                log.info(
+                    "Feed checkpoint %ss old (> %ss) — skipping restore, warming up",
+                    int(age), max_age_seconds,
+                )
+                return False
+            restored: list[tuple[datetime, Decimal, Decimal]] = []
+            for t, p, v in serialized:
+                dt = datetime.fromisoformat(t)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                restored.append((dt, Decimal(str(p)), Decimal(str(v))))
+        except (ValueError, TypeError, IndexError) as exc:
+            log.warning("Feed checkpoint malformed (%s) — warming up", exc)
+            return False
+        self.candles.clear()
+        self.candles.extend(restored)
+        self._finalized_count = len(restored)
+        log.info(
+            "Restored %d BTC candles from checkpoint (~22-min warm-up skipped)",
+            len(restored),
+        )
+        return True
 
     def ingest_tick(self, price: str | float | int, at: datetime | None = None) -> None:
         """Process a single BTC price tick from the WebSocket."""
@@ -121,6 +183,7 @@ class BayseFeed:
             if elapsed >= self.candle_window_seconds:
                 # Finalize previous candle
                 self.candles.append((self._candle_start, self._candle_close, self._candle_volume))
+                self._finalized_count += 1
                 # Start new candle
                 self._candle_start = now
                 self._candle_close = p
@@ -189,8 +252,10 @@ class BayseFeed:
     ) -> None:
         """Main WebSocket loop with bounded reconnect and exponential backoff.
 
-        No REST reseed — builds candle history purely from WS ticks.
-        Features remain incomplete during the initial warm-up period.
+        Candle history is seeded from the last DB checkpoint at boot (see
+        BayseFeed.restore_candles), so a restart skips the ~22-min warm-up
+        unless the checkpoint is missing or too stale. No exchange reseed —
+        the buffer holds only the engine's OWN tick-derived candles.
         """
         backoff = 1
         while not stop.is_set():
