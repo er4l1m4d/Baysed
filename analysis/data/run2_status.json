@@ -1,0 +1,81 @@
+{
+  "generated_at": "2026-09-17T08:22:42.482Z",
+  "gate_v2_rows": 13696,
+  "modeled": 13696,
+  "resolved_markets": 13683,
+  "progress_vs_target": "13696/15000 (91.3%)",
+  "first_recorded": "2026-09-12T02:15:41.399336+00:00",
+  "last_recorded": "2026-09-17T08:20:18.276917+00:00",
+  "exec_edge": {
+    "median": -0.0923,
+    "mean": -0.1247,
+    "share_positive": 0.0914,
+    "share_approvable_band": 0.0597,
+    "share_above_band": 0.0112
+  },
+  "selectivity": {
+    "approved_acc": 0.6778,
+    "rejected_acc": 0.769,
+    "approved_n": 180,
+    "rejected_n": 13503,
+    "paired_t_stat": -0.3882,
+    "paired_markets": 49
+  },
+  "calibration_gaps_run002": [
+    {
+      "bucket": "0-10%",
+      "gap": -0.9053,
+      "n": 2845
+    },
+    {
+      "bucket": "10-20%",
+      "gap": -0.6485,
+      "n": 707
+    },
+    {
+      "bucket": "20-30%",
+      "gap": -0.4825,
+      "n": 839
+    },
+    {
+      "bucket": "30-40%",
+      "gap": -0.3152,
+      "n": 993
+    },
+    {
+      "bucket": "40-50%",
+      "gap": -0.1291,
+      "n": 1334
+    },
+    {
+      "bucket": "50-60%",
+      "gap": 0.0138,
+      "n": 1652
+    },
+    {
+      "bucket": "60-70%",
+      "gap": 0.0342,
+      "n": 1077
+    },
+    {
+      "bucket": "70-80%",
+      "gap": 0.0017,
+      "n": 806
+    },
+    {
+      "bucket": "80-90%",
+      "gap": 0.0723,
+      "n": 706
+    },
+    {
+      "bucket": "90-100%",
+      "gap": 0.0355,
+      "n": 2724
+    }
+  ],
+  "verdict_readiness": {
+    "enough_modeled": false,
+    "enough_resolved": true,
+    "gate_neutral": true
+  }
+}
